@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
-<title>Disc Throw — BLE</title>
+<title>Disc Throw — BLE + 3D Viz (v1.0)</title>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <style>
 :root{--bg:#f7f8fb;--card:#fff;--text:#111;--muted:#666;--accent:#2563eb;--ok:#16a34a;--warn:#d97706;--err:#dc2626;--border:#e5e7eb}
 *{box-sizing:border-box}
@@ -11,7 +12,7 @@ body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-appl
 header{padding:10px 14px;border-bottom:1px solid var(--border);background:#fff;position:sticky;top:0;z-index:2}
 h1{margin:0;font-size:18px}
 .wrap{padding:12px;display:grid;gap:12px;grid-template-columns:1fr}
-@media (min-width:900px){.wrap{grid-template-columns:420px 1fr}}
+@media (min-width:1200px){.wrap{grid-template-columns:420px 1fr}}
 .card{background:var(--card);border:1px solid var(--border);border-radius:10px;box-shadow:0 1px 0 rgba(0,0,0,.03)}
 .card .pad{padding:14px}
 .row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
@@ -21,19 +22,21 @@ h1{margin:0;font-size:18px}
 .btn.ok{background:var(--ok);color:#fff;border-color:var(--ok)}
 .btn.warn{background:var(--warn);color:#fff;border-color:var(--warn)}
 .btn.err{background:var(--err);color:#fff;border-color:var(--err)}
-.kvs{display:grid;grid-template-columns:repeat(2,minmax(120px,1fr));gap:8px}
+.kvs{display:grid;grid-template-columns: repeat(2, minmax(120px,1fr)); gap:8px}
 .kv{background:#fafafa;border:1px solid var(--border);border-radius:8px;padding:8px 10px}
 .kv .k{font-size:12px;color:var(--muted)}
 .kv .v{font-size:18px;font-weight:700}
-.log{height:260px;overflow:auto;background:#0b1020;color:#dbeafe;border-radius:8px;padding:10px;font-size:13px;white-space:pre-wrap}
+.log{height:220px;overflow:auto;background:#0b1020;color:#dbeafe;border-radius:8px;padding:10px;font-size:13px;white-space:pre-wrap}
 .badge{display:inline-block;padding:3px 8px;border-radius:999px;border:1px solid var(--border);font-size:12px;color:var(--muted);background:#fff}
 .footer{padding:10px 14px;color:var(--muted);font-size:12px}
+#viz{height:520px;min-height:420px}
+.small{font-size:12px;color:var(--muted)}
 </style>
 </head>
 <body>
 <header>
   <div class="row" style="justify-content:space-between;gap:8px">
-    <h1>Disc Throw — BLE</h1>
+    <h1>Disc Throw — BLE + 3D Viz <span class="small">v1.0</span></h1>
     <div class="row">
       <span id="devName" class="badge">disconnected</span>
       <button id="btnConnect" class="btn primary">Connect</button>
@@ -42,6 +45,8 @@ h1{margin:0;font-size:18px}
 </header>
 
 <main class="wrap">
+
+  <!-- Summary -->
   <section class="card">
     <div class="pad">
       <div class="row" style="justify-content:space-between;align-items:center">
@@ -65,6 +70,7 @@ h1{margin:0;font-size:18px}
     </div>
   </section>
 
+  <!-- Log -->
   <section class="card">
     <div class="pad">
       <div class="row" style="justify-content:space-between">
@@ -73,104 +79,134 @@ h1{margin:0;font-size:18px}
       </div>
       <div style="height:8px"></div>
       <pre id="log" class="log"></pre>
+      <label style="display:block;margin-top:6px"><input id="dbg" type="checkbox" checked> Debug chunks</label>
     </div>
   </section>
+
+  <!-- Visualization -->
+  <section class="card">
+    <div class="pad">
+      <div class="row" style="justify-content:space-between;align-items:center">
+        <h2 style="margin:0;font-size:16px">3D Visualization</h2>
+        <div class="row">
+          <input id="fileBin" type="file" class="btn" accept=".bin" title="Load .bin to visualize"/>
+          <button id="btnViz" class="btn">Visualize last dump</button>
+          <a id="btnCSV" class="btn" download="throw.csv" style="display:none">CSV</a>
+          <a id="btnPNG" class="btn" download="throw.png" style="display:none">PNG</a>
+        </div>
+      </div>
+      <div class="small" id="vizStatus" style="margin-top:6px">Load a .bin or press “Visualize last dump”.</div>
+      <div id="viz"></div>
+    </div>
+  </section>
+
 </main>
 
 <div class="footer">
-  Tip: open over <b>HTTPS</b> in a browser that supports Web Bluetooth (Chrome/Edge desktop; Safari iOS 16.4+).
+  Tip: open over <b>HTTPS</b> in Chrome/Edge desktop (or Safari iOS 16.4+).
 </div>
 
 <script>
 (() => {
+  // ---------- BLE (NUS) ----------
   const NUS_SERVICE='6e400001-b5a3-f393-e0a9-e50e24dcca9e';
   const NUS_RX='6e400002-b5a3-f393-e0a9-e50e24dcca9e';
   const NUS_TX='6e400003-b5a3-f393-e0a9-e50e24dcca9e';
 
-  const logEl=document.getElementById('log');
-  const devNameEl=document.getElementById('devName');
-  const btnConnect=document.getElementById('btnConnect');
-  const btnRearm=document.getElementById('btnRearm');
-  const btnSummary=document.getElementById('btnSummary');
-  const btnDump=document.getElementById('btnDump');
-  const btnErase=document.getElementById('btnErase');
-  const btnSave=document.getElementById('btnSave');
+  // UI
+  const logEl = document.getElementById('log');
+  const devNameEl = document.getElementById('devName');
+  const btnConnect = document.getElementById('btnConnect');
+  const btnRearm = document.getElementById('btnRearm');
+  const btnSummary = document.getElementById('btnSummary');
+  const btnDump = document.getElementById('btnDump');
+  const btnErase = document.getElementById('btnErase');
+  const btnSave = document.getElementById('btnSave');
 
-  const apexEl=document.getElementById('apex');
-  const samplesEl=document.getElementById('samples');
-  const apeakEl=document.getElementById('apeak');
-  const wpeakEl=document.getElementById('wpeak');
-  const durEl=document.getElementById('dur');
-  const pdropEl=document.getElementById('pdrop');
+  const apexEl = document.getElementById('apex');
+  const samplesEl = document.getElementById('samples');
+  const apeakEl = document.getElementById('apeak');
+  const wpeakEl = document.getElementById('wpeak');
+  const durEl   = document.getElementById('dur');
+  const pdropEl = document.getElementById('pdrop');
 
-  const dbgWrap=document.createElement('label');
-  dbgWrap.style.display='block';
-  dbgWrap.style.marginTop='6px';
-  dbgWrap.innerHTML='<input id="dbg" type="checkbox" checked> Debug chunks';
-  logEl.parentElement.appendChild(dbgWrap);
-  const dbg=()=>document.getElementById('dbg').checked;
+  // Viz UI
+  const btnViz = document.getElementById('btnViz');
+  const fileBin = document.getElementById('fileBin');
+  const btnCSV = document.getElementById('btnCSV');
+  const btnPNG = document.getElementById('btnPNG');
+  const vizStatus = document.getElementById('vizStatus');
+  const vizDiv = document.getElementById('viz');
 
+  // State
   let device, server, rxChar, txChar, connected=false;
-
+  let userAskedDump=false, dumping=false, dumpExpected=0;
+  let dumpBuf=new Uint8Array(0), hdrBuf=new Uint8Array(0);
   const td=new TextDecoder();
   let textBuf='';
 
-  let dumping=false, dumpExpected=0, dumpBuf=new Uint8Array(0), userAskedDump=false, hdrBuf=new Uint8Array(0);
-
+  // Helpers
   function log(msg,color){const d=document.createElement('div');d.textContent=msg;if(color)d.style.color=color;logEl.appendChild(d);logEl.scrollTop=logEl.scrollHeight;}
+  const dbg=()=>document.getElementById('dbg').checked;
   const hexPreview=(b,m=16)=>{const n=Math.min(b.length,m);let s='';for(let i=0;i<n;i++)s+=b[i].toString(16).padStart(2,'0')+' ';return s.trim()+(b.length>n?' …':'')};
-  const setButtons=en=>{btnRearm.disabled=btnSummary.disabled=btnDump.disabled=btnErase.disabled=!en;};
+  const setButtons=en=>{btnRearm.disabled=btnSummary.disabled=btnDump.disabled=btnErase.disabled=!en;}
   function uiConnected(name){connected=true;devNameEl.textContent=name||'connected';devNameEl.style.borderColor='#16a34a';devNameEl.style.color='#16a34a';btnConnect.textContent='Disconnect';setButtons(true);}
   function uiDisconnected(){connected=false;devNameEl.textContent='disconnected';devNameEl.style.borderColor='#e5e7eb';devNameEl.style.color='#666';btnConnect.textContent='Connect';setButtons(false);}
 
   async function connect(){
     try{
       const dev=await navigator.bluetooth.requestDevice({filters:[{services:[NUS_SERVICE]}],optionalServices:[NUS_SERVICE]});
-      device=dev; device.addEventListener('gattserverdisconnected',onDisconnected);
+      device=dev; device.addEventListener('gattserverdisconnected', onDisconnected);
       server=await device.gatt.connect();
       const svc=await server.getPrimaryService(NUS_SERVICE);
       rxChar=await svc.getCharacteristic(NUS_RX);
       txChar=await svc.getCharacteristic(NUS_TX);
       await txChar.startNotifications();
-      txChar.addEventListener('characteristicvaluechanged',onTxNotify);
-      uiConnected(device.name||'DiscThrower');
-      log(`Connected to ${device.name||'DiscThrower'}`);
+      txChar.addEventListener('characteristicvaluechanged', onTxNotify);
+      uiConnected(device.name||'DiscThrower'); log(`Connected to ${device.name||'DiscThrower'}`);
     }catch(e){log('Connect error: '+e,'#fca5a5');}
   }
-  async function disconnect(){try{if(device&&device.gatt.connected)device.gatt.disconnect();}catch{}uiDisconnected();}
-  function onDisconnected(){log('Disconnected','#fca5a5');uiDisconnected();}
+  async function disconnect(){try{if(device&&device.gatt.connected)device.gatt.disconnect();}catch{} uiDisconnected();}
+  function onDisconnected(){log('Disconnected','#fca5a5'); uiDisconnected();}
 
-  function appendDumpData(arr){const old=dumpBuf;dumpBuf=new Uint8Array(old.length+arr.length);dumpBuf.set(old,0);dumpBuf.set(arr,old.length);}
+  async function sendCmd(s){
+    if(!rxChar) return;
+    const enc=new TextEncoder(); const data=enc.encode(s+"\n");
+    for(let i=0;i<data.length;i+=200){ await rxChar.writeValueWithoutResponse(data.slice(i,i+200)); await new Promise(r=>setTimeout(r,6)); }
+  }
+
+  function appendDumpData(arr){ const old=dumpBuf; dumpBuf=new Uint8Array(old.length+arr.length); dumpBuf.set(old,0); dumpBuf.set(arr,old.length); }
   function finishDump(reason='bytes_complete_exact'){
-    dumping=false;userAskedDump=false;
+    dumping=false; userAskedDump=false;
     const blob=new Blob([dumpBuf],{type:'application/octet-stream'});
     const url=URL.createObjectURL(blob);
-    btnSave.href=url;btnSave.style.display='inline-block';
+    btnSave.href=url; btnSave.style.display='inline-block';
     const ts=new Date().toISOString().replace(/[:.]/g,'-');
     btnSave.download=`throw_${ts}.bin`;
     log(`Dump finished (${dumpBuf.length}/${dumpExpected}) [reason=${reason}]. Tap "Save dump".`,'#86efac');
+    // Auto-visualize
+    visualizeBytes(dumpBuf).catch(e=>{vizStatus.textContent='Viz error: '+e;});
   }
-  function findDl01Header(b){for(let i=0;i<=b.length-4;i++){if(b[i]===0x44&&b[i+1]===0x4C&&b[i+2]===0x30&&b[i+3]===0x31)return i;}return -1;}
+  const findDl01Header=b=>{for(let i=0;i<=b.length-4;i++){if(b[i]===0x44&&b[i+1]===0x4C&&b[i+2]===0x30&&b[i+3]===0x31)return i;}return -1;}
 
   function onTxNotify(e){
-    const v=new Uint8Array(e.target.value.buffer);
-    if(dbg()) log(`[notify] len=${v.length} hex=${hexPreview(v)}`,'#94a3b8');
+    const v = new Uint8Array(e.target.value.buffer);
+    if (dbg()) log(`[notify] len=${v.length} hex=${hexPreview(v)}`,'#94a3b8');
 
-    if(dumping){
+    if (dumping){
       appendDumpData(v);
-      if(dumpBuf.length>=dumpExpected){
-        const extra=dumpBuf.length-dumpExpected;
-        if(extra>0){const tail=dumpBuf.slice(dumpExpected);dumpBuf=dumpBuf.slice(0,dumpExpected);finishDump();textBuf+=td.decode(tail,{stream:true});}
+      if (dumpBuf.length >= dumpExpected){
+        const extra = dumpBuf.length - dumpExpected;
+        if (extra>0){ const tail=dumpBuf.slice(dumpExpected); dumpBuf=dumpBuf.slice(0,dumpExpected); finishDump(); textBuf+=td.decode(tail,{stream:true}); }
         else finishDump();
       }
       return;
     }
 
-    if(userAskedDump){
-      const concat=new Uint8Array(hdrBuf.length+v.length);
-      concat.set(hdrBuf,0); concat.set(v,hdrBuf.length);
+    if (userAskedDump){
+      const concat=new Uint8Array(hdrBuf.length+v.length); concat.set(hdrBuf,0); concat.set(v,hdrBuf.length);
       const idx=findDl01Header(concat);
-      if(idx!==-1 && concat.length>=idx+8){
+      if (idx!==-1 && concat.length>=idx+8){
         const off=idx+4;
         dumpExpected = concat[off] | (concat[off+1]<<8) | (concat[off+2]<<16) | (concat[off+3]<<24);
         dumpBuf=new Uint8Array(0); dumping=true;
@@ -183,7 +219,7 @@ h1{margin:0;font-size:18px}
       hdrBuf=concat.slice(Math.max(0,concat.length-7));
     }
 
-    textBuf+=td.decode(v,{stream:true});
+    textBuf += td.decode(v,{stream:true});
     processTextBuf();
   }
 
@@ -192,10 +228,8 @@ h1{margin:0;font-size:18px}
     while((pos=textBuf.indexOf('\n'))!==-1){
       const raw=textBuf.slice(0,pos); textBuf=textBuf.slice(pos+1);
       const line=raw.trim(); if(!line) continue;
-
       if(line[0]==='{' && line[line.length-1]==='}'){
         try{
-          // Defensive: accept NaN/Infinity if ever sent
           const safe=line.replace(/\bNaN\b/gi,'null').replace(/\b-?Infinity\b/gi,'null');
           const obj=JSON.parse(safe);
           if(obj && obj.type==='summary'){ applySummary(obj); log('Summary parsed & applied.','#93c5fd'); continue; }
@@ -206,32 +240,181 @@ h1{margin:0;font-size:18px}
     }
   }
 
-  function applySummary(obj){
-    apexEl.textContent   = Number.isFinite(obj.apex_m)     ? obj.apex_m.toFixed(2)   : '—';
-    samplesEl.textContent= typeof obj.samples==='number'   ? obj.samples            : '—';
-    apeakEl.textContent  = Number.isFinite(obj.a_peak_g)   ? obj.a_peak_g.toFixed(3): '—';
-    wpeakEl.textContent  = Number.isFinite(obj.w_peak_dps) ? obj.w_peak_dps.toFixed(1): '—';
-    durEl.textContent    = typeof obj.duration_ms==='number' ? obj.duration_ms      : '—';
-    pdropEl.textContent  = Number.isFinite(obj.p_drop_Pa)  ? obj.p_drop_Pa.toFixed(1): '—';
+  function applySummary(o){
+    apexEl.textContent   = Number.isFinite(o.apex_m)     ? o.apex_m.toFixed(2)    : '—';
+    samplesEl.textContent= typeof o.samples==='number'   ? o.samples             : '—';
+    apeakEl.textContent  = Number.isFinite(o.a_peak_g)   ? o.a_peak_g.toFixed(3) : '—';
+    wpeakEl.textContent  = Number.isFinite(o.w_peak_dps) ? o.w_peak_dps.toFixed(1): '—';
+    durEl.textContent    = typeof o.duration_ms==='number'? o.duration_ms        : '—';
+    pdropEl.textContent  = Number.isFinite(o.p_drop_Pa)  ? o.p_drop_Pa.toFixed(1): '—';
   }
 
-  async function sendCmd(s){
-    if(!rxChar) return;
-    const enc=new TextEncoder();
-    const data=enc.encode(s+"\n");
-    for(let i=0;i<data.length;i+=200){
-      await rxChar.writeValueWithoutResponse(data.slice(i,i+200));
-      await new Promise(r=>setTimeout(r,6));
-    }
-  }
-
-  btnConnect.addEventListener('click', async()=>{ if(!connected){ log('Connect button clicked'); await connect(); } else { log('Disconnect button clicked'); await disconnect(); }});
+  // UI events
+  btnConnect.addEventListener('click', async()=>{ if(!connected){log('Connect button clicked'); await connect();} else {log('Disconnect button clicked'); await disconnect();}});
   btnRearm.addEventListener('click', ()=>{ log('Rearm button clicked'); sendCmd('REARM'); });
   btnSummary.addEventListener('click', ()=>{ log('Summary button clicked'); log('Sending "SUMMARY" (8B)…'); sendCmd('SUMMARY'); log('"SUMMARY" sent; awaiting response…'); });
   btnDump.addEventListener('click', ()=>{ log('Dump button clicked'); btnSave.style.display='none'; dumping=false; dumpExpected=0; dumpBuf=new Uint8Array(0); userAskedDump=true; hdrBuf=new Uint8Array(0); log('DUMP sent (waiting for DL01 header)…'); sendCmd('DUMP'); });
   btnErase.addEventListener('click', ()=>{ log('Erase button clicked'); sendCmd('ERASE'); });
 
-  if(!('bluetooth'in navigator)){ log('Web Bluetooth not supported in this browser.','#fca5a5'); btnConnect.disabled=true; }
+  if(!('bluetooth' in navigator)){ log('Web Bluetooth not supported in this browser.','#fca5a5'); btnConnect.disabled=true; }
+
+  // ========= 3D VISUALIZATION (browser-side) =========
+  const G = 9.80665;
+  const fmt = (x,d=1)=>Number.isFinite(x)?x.toFixed(d):'—';
+
+  function stripHeaderIfAny(bytes){
+    if (bytes.length>=8 && bytes[0]==0x44 && bytes[1]==0x4c && bytes[2]==0x30 && bytes[3]==0x31){
+      const sz = bytes[4] | (bytes[5]<<8) | (bytes[6]<<16) | (bytes[7]<<24);
+      return bytes.slice(8, 8+sz);
+    }
+    return bytes;
+  }
+  function parseRecords(buf){
+    const rec=4+2*6+4, n=Math.floor(buf.length/rec);
+    const ms=new Uint32Array(n);
+    const ax=new Float64Array(n), ay=new Float64Array(n), az=new Float64Array(n);
+    const gx=new Float64Array(n), gy=new Float64Array(n), gz=new Float64Array(n), p=new Float64Array(n);
+    const dv=new DataView(buf.buffer, buf.byteOffset, n*rec); let o=0;
+    for(let i=0;i<n;i++){
+      ms[i]=dv.getUint32(o,true); o+=4;
+      ax[i]=dv.getInt16(o,true)/100; o+=2; ay[i]=dv.getInt16(o,true)/100; o+=2; az[i]=dv.getInt16(o,true)/100; o+=2;
+      gx[i]=dv.getInt16(o,true)/100; o+=2; gy[i]=dv.getInt16(o,true)/100; o+=2; gz[i]=dv.getInt16(o,true)/100; o+=2;
+      p[i]=dv.getFloat32(o,true); o+=4;
+    }
+    return {ms,ax,ay,az,gx,gy,gz,p};
+  }
+  function complementaryRPY(ax,ay,az,gx,gy,gz,dt,tau=0.5){
+    const n=dt.length, roll=new Float64Array(n), pitch=new Float64Array(n), yaw=new Float64Array(n);
+    const gxr=gx.map(v=>v*Math.PI/180), gyr=gy.map(v=>v*Math.PI/180), gzr=gz.map(v=>v*Math.PI/180);
+    roll[0]=Math.atan2(ay[0],az[0]); pitch[0]=Math.atan2(-ax[0], Math.hypot(ay[0],az[0]));
+    for(let k=1;k<n;k++){
+      const a=tau/(tau+dt[k]);
+      const roll_g=roll[k-1]+gxr[k]*dt[k], pitch_g=pitch[k-1]+gyr[k]*dt[k]; yaw[k]=yaw[k-1]+gzr[k]*dt[k];
+      const roll_a=Math.atan2(ay[k],az[k]), pitch_a=Math.atan2(-ax[k], Math.hypot(ay[k],az[k]));
+      roll[k]=a*roll_g+(1-a)*roll_a; pitch[k]=a*pitch_g+(1-a)*pitch_a;
+    }
+    return {roll,pitch,yaw};
+  }
+  function rotationMats(roll,pitch,yaw){
+    const n=roll.length, R=new Array(n);
+    for(let i=0;i<n;i++){
+      const cr=Math.cos(roll[i]), sr=Math.sin(roll[i]);
+      const cp=Math.cos(pitch[i]), sp=Math.sin(pitch[i]);
+      const cy=Math.cos(yaw[i]), sy=Math.sin(yaw[i]);
+      R[i]=[[cy*cp, cy*sp*sr - sy*cr,  cy*sp*cr + sy*sr],
+            [sy*cp, sy*sp*sr + cy*cr,  sy*sp*cr - cy*sr],
+            [-sp,   cp*sr,             cp*cr]];
+    } return R;
+  }
+  const mulMV=(M,v)=>[M[0][0]*v[0]+M[0][1]*v[1]+M[0][2]*v[2], M[1][0]*v[0]+M[1][1]*v[1]+M[1][2]*v[2], M[2][0]*v[0]+M[2][1]*v[1]+M[2][2]*v[2]];
+  function detectMotion(a_ms2, g_dps){
+    const n=a_ms2.length, mask=new Array(n).fill(false);
+    for(let i=0;i<n;i++){
+      const aN=Math.hypot(...a_ms2[i])/G; const gN=Math.hypot(...g_dps[i]); mask[i]=(gN>50)||Math.abs(aN-1)>0.15;
+    }
+    // smooth 9
+    const k=9, w=Array(k).fill(1/k), out=new Array(n).fill(false);
+    for(let i=0;i<n;i++){ let s=0; for(let j=0;j<k;j++){const x=i+j-Math.floor(k/2); if(x>=0&&x<n)s+=(mask[x]?1:0)*w[j];} out[i]=s>0.5; }
+    return out;
+  }
+  function integrateWithEndZero(a,t,move){
+    const n=t.length, v=Array(n).fill(0).map(_=>[0,0,0]), p=Array(n).fill(0).map(_=>[0,0,0]);
+    const dt=Array(n); dt[0]=0; for(let i=1;i<n;i++) dt[i]=t[i]-t[i-1];
+    for(let i=1;i<n;i++) for(let j=0;j<3;j++) v[i][j]=v[i-1][j]+a[i][j]*dt[i];
+    if (move.some(Boolean)){
+      const i0=move.indexOf(true), i1=move.length-1 - move.slice().reverse().indexOf(true);
+      const T=Math.max(t[i1]-t[i0],1e-6); const drift=[v[i1][0]/T,v[i1][1]/T,v[i1][2]/T];
+      for(let i=i0;i<=i1;i++){const s=t[i]-t[i0]; for(let j=0;j<3;j++) v[i][j]-=s*drift[j];}
+      for(let i=1;i<n;i++) for(let j=0;j<3;j++) p[i][j]=p[i-1][j]+v[i][j]*dt[i];
+      const o=[...p[i0]]; for(let i=0;i<n;i++) for(let j=0;j<3;j++) p[i][j]-=o[j];
+    }
+    return {v,p};
+  }
+  function pickReleaseIndex(t, speed){
+    const k=7, w=Array(k).fill(1/k), s=new Array(t.length).fill(0);
+    for(let i=0;i<t.length;i++){let m=0; for(let j=0;j<k;j++){const x=i+j-Math.floor(k/2); if(x>=0&&x<t.length)m+=speed[x]*w[j];} s[i]=m;}
+    const endT=t[0]+Math.min(0.30, t[t.length-1]-t[0]); let endI=t.findIndex(x=>x>=endT); if(endI<0) endI=t.length;
+    let mx=-1, mi=0; for(let i=0;i<Math.max(3,endI);i++){if(s[i]>mx){mx=s[i]; mi=i;}} return mi;
+  }
+  const yawMatrix=deg=>{const r=deg*Math.PI/180,c=Math.cos(r),s=Math.sin(r);return [[c,-s,0],[s,c,0],[0,0,1]];}
+  const mulYaw=(M,v)=>[M[0][0]*v[0]+M[0][1]*v[1], M[1][0]*v[0]+M[1][1]*v[1], v[2]];
+
+  async function visualizeBytes(rawBytes){
+    try{
+      vizStatus.textContent='Parsing…';
+      const payload = stripHeaderIfAny(new Uint8Array(rawBytes));
+      const rec = parseRecords(payload);
+      const t = Array.from(rec.ms, m=>m/1000);
+      const dt = t.map((x,i)=>i?x-t[i-1]:0);
+
+      const {roll,pitch,yaw} = complementaryRPY(rec.ax,rec.ay,rec.az,rec.gx,rec.gy,rec.gz,dt,0.5);
+      const R = rotationMats(roll,pitch,yaw);
+
+      const aBody = rec.ax.map((_,i)=>[rec.ax[i],rec.ay[i],rec.az[i]]);
+      const aWorld = aBody.map((v,i)=>mulMV(R[i],v));
+      const aLin = aWorld.map(v=>[v[0],v[1],v[2]-G]);
+      const g3 = rec.gx.map((_,i)=>[rec.gx[i],rec.gy[i],rec.gz[i]]);
+
+      const move = detectMotion(aBody, g3);
+      const {v,p} = integrateWithEndZero(aLin, t, move);
+      const speed = v.map(u=>Math.hypot(...u)+1e-12);
+      const ir = pickReleaseIndex(t, speed);
+
+      // Altitude baseline
+      const valid = rec.p.map(x=>Number.isFinite(x)&&x>1);
+      const p0 = (()=>{const vv=[];for(let i=0;i<rec.p.length;i++) if(valid[i]) vv.push(rec.p[i]); return vv.length?vv.slice(0,Math.max(5,Math.floor(vv.length/50))).reduce((a,b)=>a+b)/Math.max(1,Math.max(5,Math.floor(vv.length/50))):101325;})();
+      const alt = rec.p.map(x=>44330*(1.0 - Math.pow((x/100)/(p0/100), 1/5.255)));
+
+      // Align so +X is forward at release
+      const theta = Math.atan2(v[ir][1], v[ir][0])*180/Math.PI;
+      const Q = yawMatrix(-theta);
+      const pView = p.map(u=>mulYaw(Q,u));
+
+      // Metrics (light)
+      const toKmh = s=>s*3.6;
+      const peakSp = Math.max(...speed);
+      const w50 = Math.max(1, Math.floor(0.05/Math.max(0.01, (t[t.length-1]-t[0])/(t.length-1)))));
+      const releaseSp = Math.max(...speed.slice(Math.max(0,ir-w50), Math.min(speed.length, ir+w50+1)));
+      const carry = Math.hypot(p[p.length-1][0]-p[0][0], p[p.length-1][1]-p[0][1]);
+      const apex  = (Math.max(...alt) - alt[0]) || 0;
+      const hang  = t[t.length-1] - t[0];
+
+      // Update summary tiles if empty
+      if (samplesEl.textContent==='—') samplesEl.textContent=rec.ms.length;
+      if (durEl.textContent==='—')     durEl.textContent=Math.round(hang*1000);
+      if (apexEl.textContent==='—')    apexEl.textContent=fmt(apex,2);
+
+      // Plotly
+      vizStatus.textContent='Rendering…';
+      const xs=pView.map(u=>u[0]), ys=pView.map(u=>u[1]), zs=pView.map(u=>u[2]);
+      const rng = a => { const lo=Math.min(...a), hi=Math.max(...a); return (hi>lo)?[lo,hi]:[-1,1]; };
+      const data = [
+        {type:'scatter3d', mode:'lines', x:xs, y:ys, z:zs, line:{width:6}, name:'This throw'},
+        {type:'scatter3d', mode:'markers', x:[xs[ir]], y:[ys[ir]], z:[zs[ir]], marker:{size:6,symbol:'diamond'}, name:'Release'},
+        {type:'scatter3d', mode:'markers', x:[xs.at(-1)], y:[ys.at(-1)], z:[zs.at(-1)], marker:{size:6,symbol:'x'}, name:'End'}
+      ];
+      await Plotly.newPlot(vizDiv, data, {
+        scene:{xaxis:{title:'X (m)',range:rng(xs)}, yaxis:{title:'Y (m)',range:rng(ys)}, zaxis:{title:'Z (m)',range:rng(zs)}, aspectmode:'data'},
+        margin:{l:0,r:0,t:30,b:0}, title:`Flight — release ${fmt(toKmh(releaseSp),1)} km/h · peak ${fmt(toKmh(peakSp),1)} km/h · carry ${fmt(carry,1)} m · apex ${fmt(apex,1)} m`
+      }, {responsive:true});
+      vizStatus.textContent='Done.';
+
+      // CSV & PNG
+      const rows=["t_s,x_m,y_m,z_m,vx,vy,vz,axw,ayw,azw,alt_m"];
+      for(let i=0;i<t.length;i++){
+        rows.push([t[i], pView[i][0], pView[i][1], pView[i][2],
+                   v[i][0], v[i][1], v[i][2],
+                   aWorld[i][0], aWorld[i][1], aWorld[i][2],
+                   alt[i]].join(","));
+      }
+      const csvBlob=new Blob([rows.join("\n")], {type:'text/csv'});
+      btnCSV.href=URL.createObjectURL(csvBlob); btnCSV.style.display='inline-block';
+      btnPNG.onclick=async()=>{const url=await Plotly.toImage(vizDiv,{format:'png',width:1200,height:700,scale:2}); btnPNG.href=url;}; btnPNG.style.display='inline-block';
+    }catch(e){ vizStatus.textContent='Viz error: '+e; throw e; }
+  }
+
+  btnViz.addEventListener('click', ()=>{ if(dumpBuf.length) visualizeBytes(dumpBuf); else vizStatus.textContent='No dump in memory yet. Press Dump first or load a .bin.'; });
+  fileBin.addEventListener('change', async e=>{ const f=e.target.files?.[0]; if(!f) return; const arr=new Uint8Array(await f.arrayBuffer()); visualizeBytes(arr); });
 })();
 </script>
 </body>
