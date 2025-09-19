@@ -5,30 +5,23 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
 <title>Disc Throw — BLE</title>
 <style>
-  :root{
-    --bg:#f7f8fb; --card:#ffffff; --text:#111; --muted:#666; --accent:#2563eb; --ok:#16a34a; --warn:#d97706; --err:#dc2626;
-    --border:#e5e7eb;
-  }
+  :root{ --bg:#f7f8fb; --card:#ffffff; --text:#111; --muted:#666; --accent:#2563eb; --ok:#16a34a; --warn:#d97706; --err:#dc2626; --border:#e5e7eb; }
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
   header{padding:10px 14px;border-bottom:1px solid var(--border);background:#fff;position:sticky;top:0;z-index:2}
   h1{margin:0;font-size:18px}
   .wrap{padding:12px;display:grid;gap:12px;grid-template-columns:1fr}
-  @media (min-width: 900px){ .wrap{grid-template-columns: 420px 1fr;} }
-
+  @media (min-width:900px){ .wrap{grid-template-columns:420px 1fr;} }
   .card{background:var(--card);border:1px solid var(--border);border-radius:10px;box-shadow:0 1px 0 rgba(0,0,0,.03)}
   .card .pad{padding:14px}
   .row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
-  .btn{
-    appearance:none;border:1px solid var(--border);background:#fff;color:var(--text);
-    padding:10px 14px;border-radius:10px;font-weight:600;cursor:pointer;min-width:110px;
-  }
+  .btn{appearance:none;border:1px solid var(--border);background:#fff;color:var(--text);padding:10px 14px;border-radius:10px;font-weight:600;cursor:pointer;min-width:110px}
   .btn:disabled{opacity:.5;cursor:not-allowed}
   .btn.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
   .btn.ok{background:var(--ok);color:#fff;border-color:var(--ok)}
   .btn.warn{background:var(--warn);color:#fff;border-color:var(--warn)}
   .btn.err{background:var(--err);color:#fff;border-color:var(--err)}
-  .kvs{display:grid;grid-template-columns: repeat(2, minmax(120px,1fr)); gap:8px}
+  .kvs{display:grid;grid-template-columns:repeat(2,minmax(120px,1fr));gap:8px}
   .kv{background:#fafafa;border:1px solid var(--border);border-radius:8px;padding:8px 10px}
   .kv .k{font-size:12px;color:var(--muted)}
   .kv .v{font-size:18px;font-weight:700}
@@ -50,8 +43,7 @@
 </header>
 
 <main class="wrap">
-
-  <!-- Summary card -->
+  <!-- Summary -->
   <section class="card">
     <div class="pad">
       <div class="row" style="justify-content:space-between;align-items:center">
@@ -75,7 +67,7 @@
     </div>
   </section>
 
-  <!-- Live log & download -->
+  <!-- Log -->
   <section class="card">
     <div class="pad">
       <div class="row" style="justify-content:space-between">
@@ -89,17 +81,17 @@
 </main>
 
 <div class="footer" id="supportNote">
-  Tip: open this page in Chrome/Edge over <b>HTTPS</b>. On iPhone, Safari doesn’t support Web Bluetooth.
+  Tip: use Chrome/Edge on desktop (HTTPS). iOS Safari doesn’t support Web Bluetooth.
 </div>
 
 <script>
 (() => {
-  // --- Nordic UART Service UUIDs (NUS) ---
+  // --- NUS UUIDs ---
   const NUS_SERVICE = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
   const NUS_RX      = '6e400002-b5a3-f393-e0a9-e50e24dcca9e'; // Write
   const NUS_TX      = '6e400003-b5a3-f393-e0a9-e50e24dcca9e'; // Notify
 
-  // UI handles
+  // --- UI elements ---
   const logEl = document.getElementById('log');
   const devNameEl = document.getElementById('devName');
   const btnConnect = document.getElementById('btnConnect');
@@ -128,12 +120,12 @@
   let device, server, rxChar, txChar;
   let connected = false;
 
-  // Text buffering (for normal logs/JSON)
-  let textBuf = "";                 
+  // Text buffer
+  let textBuf = "";
   const td = new TextDecoder();
 
   // Dump state
-  let awaitingHeader = false;       // waiting for DL01 header after "DUMP" cmd
+  let awaitingHeader = false;
   let awaitingHeaderBuf = new Uint8Array(0);
   let awaitingHeaderTimeout = null;
 
@@ -143,7 +135,30 @@
   let dumpBytesSeen = 0;
   let lastProgressPct = -1;
 
-  // Helpers
+  // NEW: detect '{"type":"dump_done"}' inside the binary stream
+  const dumpDoneBytes = new TextEncoder().encode('{"type":"dump_done"}');
+  function indexOfSubarray(hay, needle) {
+    // Naive search; fine for small buffers
+    outer: for (let i = 0; i <= hay.length - needle.length; i++) {
+      for (let j = 0; j < needle.length; j++) if (hay[i + j] !== needle[j]) continue outer;
+      return i;
+    }
+    return -1;
+  }
+
+  // NEW: inactivity timeout during dump
+  let dumpSilenceTimer = null;
+  function armDumpSilenceTimer() {
+    clearTimeout(dumpSilenceTimer);
+    dumpSilenceTimer = setTimeout(() => {
+      if (dumping) {
+        log(`Dump inactivity timeout — finalizing partial file (${dumpBytesSeen}/${dumpExpected}).`, '#fde68a');
+        finishDump('timeout_partial');
+      }
+    }, 2000); // 2s without new data → finish partial
+  }
+
+  // UI helpers
   function log(msg, color) {
     const line = document.createElement('div');
     line.textContent = msg;
@@ -192,7 +207,7 @@
       server = await device.gatt.connect();
 
       const svc = await server.getPrimaryService(NUS_SERVICE).catch(err => {
-        log('NUS service not found on this device. Check the firmware UUIDs.', '#fca5a5');
+        log('NUS service not found on this device. Check firmware UUIDs.', '#fca5a5');
         throw err;
       });
 
@@ -232,18 +247,19 @@
   function startAwaitingHeader() {
     awaitingHeader = true;
     awaitingHeaderBuf = new Uint8Array(0);
-    if (awaitingHeaderTimeout) clearTimeout(awaitingHeaderTimeout);
+    clearTimeout(awaitingHeaderTimeout);
     awaitingHeaderTimeout = setTimeout(() => {
       if (!awaitingHeader) return;
       awaitingHeader = false;
       log('Timeout while waiting for DL01 header — treating buffered data as text.', '#fde68a');
       try { textBuf += new TextDecoder().decode(awaitingHeaderBuf, {stream:true}); } catch {}
       awaitingHeaderBuf = new Uint8Array(0);
+      setButtons(true); btnDump.textContent = 'Dump';
     }, 2000);
   }
   function enterDump(size, firstPayload) {
     awaitingHeader = false;
-    if (awaitingHeaderTimeout) { clearTimeout(awaitingHeaderTimeout); awaitingHeaderTimeout = null; }
+    clearTimeout(awaitingHeaderTimeout);
     dumpExpected = size >>> 0;
     dumping = true;
     dumpBuf = new Uint8Array(0);
@@ -253,14 +269,35 @@
     setButtons(false);
     log(`DL01 header detected. Dump started: expecting ${dumpExpected} bytes`, '#fde68a');
     if (firstPayload && firstPayload.length) appendDumpData(firstPayload);
+    armDumpSilenceTimer();
   }
   function appendDumpData(arr) {
+    // While dumping, also check for {"type":"dump_done"} inside the chunk
+    let chunk = arr;
+    // Search marker in this chunk
+    const idx = indexOfSubarray(chunk, dumpDoneBytes);
+    if (idx !== -1) {
+      // Everything before the marker is binary payload
+      const pre = chunk.slice(0, idx);
+      if (pre.length) appendDumpDataCore(pre);
+      // Finish early (partial) because device signaled done
+      finishDump('dump_done_marker_early');
+      // Anything after the marker -> feed to text parser (likely ends with \n)
+      const post = chunk.slice(idx + dumpDoneBytes.length);
+      if (post.length) try { textBuf += td.decode(post, {stream:true}); } catch {}
+      return;
+    }
+    // No marker → just append
+    appendDumpDataCore(chunk);
+  }
+  function appendDumpDataCore(arr) {
     const old = dumpBuf;
     dumpBuf = new Uint8Array(old.length + arr.length);
     dumpBuf.set(old, 0);
     dumpBuf.set(arr, old.length);
     dumpBytesSeen += arr.length;
 
+    // progress every 10%
     if (dumpExpected > 0) {
       const pct = Math.floor((dumpBytesSeen / dumpExpected) * 100);
       if (pct >= lastProgressPct + 10 || pct === 100) {
@@ -268,8 +305,22 @@
         log(`Dump progress: ${dumpBytesSeen}/${dumpExpected} bytes (${pct}%)`, '#a7f3d0');
       }
     }
+    armDumpSilenceTimer();
+    // Complete if we hit expected size
+    if (dumpBuf.length >= dumpExpected) {
+      const extra = dumpBuf.length - dumpExpected;
+      if (extra > 0) {
+        const tail = dumpBuf.slice(dumpExpected);
+        dumpBuf = dumpBuf.slice(0, dumpExpected);
+        finishDump('bytes_complete_with_tail');
+        try { textBuf += td.decode(tail, {stream:true}); } catch {}
+      } else {
+        finishDump('bytes_complete_exact');
+      }
+    }
   }
   function finishDump(reason="bytes_complete") {
+    clearTimeout(dumpSilenceTimer);
     const finishedBytes = dumpBuf.length;
     const expect = dumpExpected;
     dumping = false;
@@ -281,7 +332,11 @@
     btnSave.download = `throw_${ts}.bin`;
     btnDump.textContent = 'Dump';
     setButtons(true);
-    log(`Dump finished (${finishedBytes}/${expect} bytes) [reason=${reason}]. Tap "Save dump".`, '#86efac');
+    if (expect && finishedBytes < expect) {
+      log(`Dump finished early (${finishedBytes}/${expect}) [reason=${reason}] — saved partial file.`, '#fde68a');
+    } else {
+      log(`Dump finished (${finishedBytes}/${expect}) [reason=${reason}]. Tap "Save dump".`, '#86efac');
+    }
   }
 
   // JSON helper
@@ -297,6 +352,7 @@
       return;
     }
     if (obj && obj.type === 'dump_done') {
+      // If this arrives in text-mode after we already finalized early, just note it
       log('Dump done message received from device.', '#bbf7d0');
       if (dumping) finishDump('dump_done_message');
       return;
@@ -311,9 +367,9 @@
 
     if (dbg()) log(`[notify] len=${v.length} hex=${hexPreview(v)}`, '#94a3b8');
 
-    // Await header mode: only search for DL01; don't decode to text
+    // Waiting for header?
     if (awaitingHeader) {
-      const maxBuf = 2048; // keep last 2KB
+      const maxBuf = 2048;
       let tmp = new Uint8Array(awaitingHeaderBuf.length + v.length);
       tmp.set(awaitingHeaderBuf, 0); tmp.set(v, awaitingHeaderBuf.length);
       if (tmp.length > maxBuf) tmp = tmp.slice(tmp.length - maxBuf);
@@ -330,27 +386,14 @@
       return;
     }
 
-    // Dumping mode: collect raw bytes
+    // Dumping?
     if (dumping) {
       appendDumpData(v);
-      if (dumpBuf.length >= dumpExpected) {
-        const extra = dumpBuf.length - dumpExpected;
-        if (extra > 0) {
-          const tail = dumpBuf.slice(dumpExpected);
-          dumpBuf = dumpBuf.slice(0, dumpExpected);
-          finishDump('bytes_complete_with_tail');
-          try { textBuf += td.decode(tail, {stream:true}); } catch {}
-        } else {
-          finishDump('bytes_complete_exact');
-        }
-      }
       return;
     }
 
-    // Normal text mode
+    // Normal text
     try { textBuf += td.decode(v, {stream:true}); } catch {}
-
-    // Process whole lines
     let pos;
     while ((pos = textBuf.indexOf('\n')) !== -1) {
       const line = textBuf.slice(0, pos).trim();
@@ -368,7 +411,7 @@
     if (!rxChar) { log(`Cannot send "${s}": RX characteristic not ready`, '#fca5a5'); return; }
     const enc = new TextEncoder();
     const data = enc.encode(s + "\n");
-    const step = 180; // conservative MTU-safe chunk
+    const step = 180;
     log(`Sending "${s}" (${data.length}B)…`);
     for (let i=0;i<data.length;i+=step) {
       await rxChar.writeValueWithoutResponse(data.slice(i, i+step));
@@ -379,39 +422,28 @@
 
   // UI bindings
   btnConnect.addEventListener('click', async()=>{ if (!connected) await connect(); else await disconnect(); });
-
-  btnRearm.addEventListener('click', ()=>{
-    log('Rearm button clicked');
-    awaitingHeader = false; awaitingHeaderBuf = new Uint8Array(0);
-    if (awaitingHeaderTimeout) { clearTimeout(awaitingHeaderTimeout); awaitingHeaderTimeout=null; }
-    sendCmd('REARM');
-  });
-
-  btnSummary.addEventListener('click', ()=>{
-    log('Summary button clicked');
-    awaitingHeader = false; awaitingHeaderBuf = new Uint8Array(0);
-    if (awaitingHeaderTimeout) { clearTimeout(awaitingHeaderTimeout); awaitingHeaderTimeout=null; }
-    sendCmd('SUMMARY');
-  });
-
+  btnRearm.addEventListener('click', ()=>{ log('Rearm button clicked'); cancelDumpModes(); sendCmd('REARM'); });
+  btnSummary.addEventListener('click', ()=>{ log('Summary button clicked'); cancelDumpModes(); sendCmd('SUMMARY'); });
   btnDump.addEventListener('click', ()=>{
     log('Dump button clicked');
     btnSave.style.display = 'none';
-    dumping = false; dumpExpected = 0; dumpBuf = new Uint8Array(0);
-    dumpBytesSeen = 0; lastProgressPct = -1;
+    dumpBuf = new Uint8Array(0); dumpExpected = 0; dumpBytesSeen = 0; lastProgressPct = -1;
     startAwaitingHeader();
     btnDump.textContent = 'Waiting header…';
     setButtons(false);
     log('DUMP sent (waiting for DL01 header)…');
     sendCmd('DUMP');
   });
+  btnErase.addEventListener('click', ()=>{ log('Erase button clicked'); cancelDumpModes(); sendCmd('ERASE'); });
 
-  btnErase.addEventListener('click', ()=>{
-    log('Erase button clicked');
+  function cancelDumpModes(){
     awaitingHeader = false; awaitingHeaderBuf = new Uint8Array(0);
-    if (awaitingHeaderTimeout) { clearTimeout(awaitingHeaderTimeout); awaitingHeaderTimeout=null; }
-    sendCmd('ERASE');
-  });
+    clearTimeout(awaitingHeaderTimeout);
+    clearTimeout(dumpSilenceTimer);
+    dumping = false;
+    btnDump.textContent = 'Dump';
+    setButtons(true);
+  }
 
   // Environment note
   if (!('bluetooth' in navigator)) {
