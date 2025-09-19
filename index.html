@@ -287,14 +287,24 @@ h1{margin:0;font-size:18px}
       const concat = new Uint8Array(hdrBuf.length + v.length);
       concat.set(hdrBuf, 0); concat.set(v, hdrBuf.length);
       const idx = findDl01Header(concat);
-      if (idx !== -1 && concat.length >= idx+8){
-        const off = idx + 4;
-        dumpExpected = concat[off] | (concat[off+1]<<8) | (concat[off+2]<<16) | (concat[off+3]<<24);
-        resetDump(); dumping = true; log('DL01 header detected. Dump started: expecting '+dumpExpected+' bytes', '#fde68a');
-        const rem = concat.slice(idx+8); if (rem.length) pushDumpChunk(rem);
-        if (dumpLength >= dumpExpected) finishDump('bytes_complete_exact');
-        return;
-      }
+if (idx !== -1 && concat.length >= idx+8){
+  const off = idx + 4;
+  resetDump();                          // <-- do this first
+  dumpExpected =
+    (concat[off]) |
+    (concat[off+1] << 8) |
+    (concat[off+2] << 16) |
+    (concat[off+3] << 24);
+  dumping = true;
+  log('DL01 header detected. Dump started: expecting ' + dumpExpected + ' bytes', '#fde68a');
+
+  const rem = concat.slice(idx+8);
+  if (rem.length) pushDumpChunk(rem);
+
+  if (dumpLength >= dumpExpected) finishDump('bytes_complete_exact');
+  return;
+}
+
       hdrBuf = concat.slice(Math.max(0, concat.length - 7));
     }
 
