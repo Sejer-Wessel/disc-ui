@@ -78,207 +78,160 @@ h1{margin:0;font-size:18px}
 </main>
 
 <div class="footer">
-  Tip: open over <b>HTTPS</b> in a browser that supports Web Bluetooth (Chrome/Edge desktop, Safari iOS 16.4+).
+  Tip: open over <b>HTTPS</b> in a browser that supports Web Bluetooth (Chrome/Edge desktop; Safari iOS 16.4+).
 </div>
 
 <script>
 (() => {
-  // NUS UUIDs
-  const NUS_SERVICE = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
-  const NUS_RX      = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';
-  const NUS_TX      = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
+  const NUS_SERVICE='6e400001-b5a3-f393-e0a9-e50e24dcca9e';
+  const NUS_RX='6e400002-b5a3-f393-e0a9-e50e24dcca9e';
+  const NUS_TX='6e400003-b5a3-f393-e0a9-e50e24dcca9e';
 
-  // UI els
-  const logEl = document.getElementById('log');
-  const devNameEl = document.getElementById('devName');
-  const btnConnect = document.getElementById('btnConnect');
-  const btnRearm = document.getElementById('btnRearm');
-  const btnSummary = document.getElementById('btnSummary');
-  const btnDump = document.getElementById('btnDump');
-  const btnErase = document.getElementById('btnErase');
-  const btnSave = document.getElementById('btnSave');
+  const logEl=document.getElementById('log');
+  const devNameEl=document.getElementById('devName');
+  const btnConnect=document.getElementById('btnConnect');
+  const btnRearm=document.getElementById('btnRearm');
+  const btnSummary=document.getElementById('btnSummary');
+  const btnDump=document.getElementById('btnDump');
+  const btnErase=document.getElementById('btnErase');
+  const btnSave=document.getElementById('btnSave');
 
-  const apexEl = document.getElementById('apex');
-  const samplesEl = document.getElementById('samples');
-  const apeakEl = document.getElementById('apeak');
-  const wpeakEl = document.getElementById('wpeak');
-  const durEl   = document.getElementById('dur');
-  const pdropEl = document.getElementById('pdrop');
+  const apexEl=document.getElementById('apex');
+  const samplesEl=document.getElementById('samples');
+  const apeakEl=document.getElementById('apeak');
+  const wpeakEl=document.getElementById('wpeak');
+  const durEl=document.getElementById('dur');
+  const pdropEl=document.getElementById('pdrop');
 
-  // Debug checkbox
-  const dbgWrap = document.createElement('label');
-  dbgWrap.style.display = 'block';
-  dbgWrap.style.marginTop = '6px';
-  dbgWrap.innerHTML = '<input id="dbg" type="checkbox" checked> Debug chunks';
+  const dbgWrap=document.createElement('label');
+  dbgWrap.style.display='block';
+  dbgWrap.style.marginTop='6px';
+  dbgWrap.innerHTML='<input id="dbg" type="checkbox" checked> Debug chunks';
   logEl.parentElement.appendChild(dbgWrap);
-  const dbg = () => document.getElementById('dbg').checked;
+  const dbg=()=>document.getElementById('dbg').checked;
 
-  // BLE state
-  let device, server, rxChar, txChar;
-  let connected = false;
+  let device, server, rxChar, txChar, connected=false;
 
-  // Text buffering for JSON lines
-  const td = new TextDecoder();
-  let textBuf = '';
+  const td=new TextDecoder();
+  let textBuf='';
 
-  // Dump state
-  let dumping = false;
-  let dumpExpected = 0;
-  let dumpBuf = new Uint8Array(0);
-  let userAskedDump = false;
-  let hdrBuf = new Uint8Array(0);
+  let dumping=false, dumpExpected=0, dumpBuf=new Uint8Array(0), userAskedDump=false, hdrBuf=new Uint8Array(0);
 
-  // Utils
-  function log(msg, color){ const d=document.createElement('div'); d.textContent=msg; if(color) d.style.color=color; logEl.appendChild(d); logEl.scrollTop=logEl.scrollHeight; }
-  const hexPreview = (bytes,max=16)=>{const n=Math.min(bytes.length,max); let s=''; for(let i=0;i<n;i++) s+=bytes[i].toString(16).padStart(2,'0')+' '; return s.trim()+(bytes.length>n?' …':'')};
-  const setButtons = en => { btnRearm.disabled = btnSummary.disabled = btnDump.disabled = btnErase.disabled = !en; };
-  function uiConnected(name){ connected=true; devNameEl.textContent=name||'connected'; devNameEl.style.borderColor='#16a34a'; devNameEl.style.color='#16a34a'; btnConnect.textContent='Disconnect'; setButtons(true); }
-  function uiDisconnected(){ connected=false; devNameEl.textContent='disconnected'; devNameEl.style.borderColor='#e5e7eb'; devNameEl.style.color='#666'; btnConnect.textContent='Connect'; setButtons(false); }
+  function log(msg,color){const d=document.createElement('div');d.textContent=msg;if(color)d.style.color=color;logEl.appendChild(d);logEl.scrollTop=logEl.scrollHeight;}
+  const hexPreview=(b,m=16)=>{const n=Math.min(b.length,m);let s='';for(let i=0;i<n;i++)s+=b[i].toString(16).padStart(2,'0')+' ';return s.trim()+(b.length>n?' …':'')};
+  const setButtons=en=>{btnRearm.disabled=btnSummary.disabled=btnDump.disabled=btnErase.disabled=!en;};
+  function uiConnected(name){connected=true;devNameEl.textContent=name||'connected';devNameEl.style.borderColor='#16a34a';devNameEl.style.color='#16a34a';btnConnect.textContent='Disconnect';setButtons(true);}
+  function uiDisconnected(){connected=false;devNameEl.textContent='disconnected';devNameEl.style.borderColor='#e5e7eb';devNameEl.style.color='#666';btnConnect.textContent='Connect';setButtons(false);}
 
-  // BLE connect/disconnect
-  async function connect() {
-    try {
-      const dev = await navigator.bluetooth.requestDevice({ filters:[{services:[NUS_SERVICE]}], optionalServices:[NUS_SERVICE] });
-      device = dev;
-      device.addEventListener('gattserverdisconnected', onDisconnected);
-      server = await device.gatt.connect();
-      const svc = await server.getPrimaryService(NUS_SERVICE);
-      rxChar = await svc.getCharacteristic(NUS_RX);
-      txChar = await svc.getCharacteristic(NUS_TX);
+  async function connect(){
+    try{
+      const dev=await navigator.bluetooth.requestDevice({filters:[{services:[NUS_SERVICE]}],optionalServices:[NUS_SERVICE]});
+      device=dev; device.addEventListener('gattserverdisconnected',onDisconnected);
+      server=await device.gatt.connect();
+      const svc=await server.getPrimaryService(NUS_SERVICE);
+      rxChar=await svc.getCharacteristic(NUS_RX);
+      txChar=await svc.getCharacteristic(NUS_TX);
       await txChar.startNotifications();
-      txChar.addEventListener('characteristicvaluechanged', onTxNotify);
-      uiConnected(device.name || 'DiscThrower');
-      log(`Connected to ${device.name || 'DiscThrower'}`);
-    } catch(e){ log('Connect error: '+e, '#fca5a5'); }
+      txChar.addEventListener('characteristicvaluechanged',onTxNotify);
+      uiConnected(device.name||'DiscThrower');
+      log(`Connected to ${device.name||'DiscThrower'}`);
+    }catch(e){log('Connect error: '+e,'#fca5a5');}
   }
-  async function disconnect(){ try{ if(device && device.gatt.connected) device.gatt.disconnect(); }catch{} uiDisconnected(); }
-  function onDisconnected(){ log('Disconnected', '#fca5a5'); uiDisconnected(); }
+  async function disconnect(){try{if(device&&device.gatt.connected)device.gatt.disconnect();}catch{}uiDisconnected();}
+  function onDisconnected(){log('Disconnected','#fca5a5');uiDisconnected();}
 
-  // Dump helpers
-  function appendDumpData(arr){ const old = dumpBuf; dumpBuf = new Uint8Array(old.length + arr.length); dumpBuf.set(old,0); dumpBuf.set(arr,old.length); }
-  function finishDump(reason='bytes_complete_exact'){ dumping=false; userAskedDump=false; const blob=new Blob([dumpBuf],{type:'application/octet-stream'}); const url=URL.createObjectURL(blob); btnSave.href=url; btnSave.style.display='inline-block'; const ts=new Date().toISOString().replace(/[:.]/g,'-'); btnSave.download=`throw_${ts}.bin`; log(`Dump finished (${dumpBuf.length}/${dumpExpected}) [reason=${reason}]. Tap "Save dump".`,'#86efac'); }
-  function findDl01Header(b){ for(let i=0;i<=b.length-4;i++){ if(b[i]===0x44 && b[i+1]===0x4C && b[i+2]===0x30 && b[i+3]===0x31) return i; } return -1; }
+  function appendDumpData(arr){const old=dumpBuf;dumpBuf=new Uint8Array(old.length+arr.length);dumpBuf.set(old,0);dumpBuf.set(arr,old.length);}
+  function finishDump(reason='bytes_complete_exact'){
+    dumping=false;userAskedDump=false;
+    const blob=new Blob([dumpBuf],{type:'application/octet-stream'});
+    const url=URL.createObjectURL(blob);
+    btnSave.href=url;btnSave.style.display='inline-block';
+    const ts=new Date().toISOString().replace(/[:.]/g,'-');
+    btnSave.download=`throw_${ts}.bin`;
+    log(`Dump finished (${dumpBuf.length}/${dumpExpected}) [reason=${reason}]. Tap "Save dump".`,'#86efac');
+  }
+  function findDl01Header(b){for(let i=0;i<=b.length-4;i++){if(b[i]===0x44&&b[i+1]===0x4C&&b[i+2]===0x30&&b[i+3]===0x31)return i;}return -1;}
 
-  // Main notify
   function onTxNotify(e){
-    const v = new Uint8Array(e.target.value.buffer);
-    if (dbg()) log(`[notify] len=${v.length} hex=${hexPreview(v)}`, '#94a3b8');
+    const v=new Uint8Array(e.target.value.buffer);
+    if(dbg()) log(`[notify] len=${v.length} hex=${hexPreview(v)}`,'#94a3b8');
 
-    // If dumping → raw bytes only
-    if (dumping){
+    if(dumping){
       appendDumpData(v);
-      if (dumpBuf.length >= dumpExpected){
-        const extra = dumpBuf.length - dumpExpected;
-        if (extra>0){
-          const tail = dumpBuf.slice(dumpExpected);
-          dumpBuf = dumpBuf.slice(0, dumpExpected);
-          finishDump();
-          textBuf += td.decode(tail,{stream:true});
-        } else finishDump();
+      if(dumpBuf.length>=dumpExpected){
+        const extra=dumpBuf.length-dumpExpected;
+        if(extra>0){const tail=dumpBuf.slice(dumpExpected);dumpBuf=dumpBuf.slice(0,dumpExpected);finishDump();textBuf+=td.decode(tail,{stream:true});}
+        else finishDump();
       }
       return;
     }
 
-    // Watch for header if user asked to dump
-    if (userAskedDump){
-      const concat = new Uint8Array(hdrBuf.length + v.length);
+    if(userAskedDump){
+      const concat=new Uint8Array(hdrBuf.length+v.length);
       concat.set(hdrBuf,0); concat.set(v,hdrBuf.length);
-      const idx = findDl01Header(concat);
-      if (idx !== -1 && concat.length >= idx+8){
-        const off = idx+4;
+      const idx=findDl01Header(concat);
+      if(idx!==-1 && concat.length>=idx+8){
+        const off=idx+4;
         dumpExpected = concat[off] | (concat[off+1]<<8) | (concat[off+2]<<16) | (concat[off+3]<<24);
-        dumpBuf = new Uint8Array(0);
-        dumping = true;
-        log(`DL01 header detected. Dump started: expecting ${dumpExpected} bytes`, '#fde68a');
-        const rem = concat.slice(idx+8);
-        if (rem.length) appendDumpData(rem);
-        hdrBuf = new Uint8Array(0);
-        if (dumpBuf.length >= dumpExpected) finishDump();
+        dumpBuf=new Uint8Array(0); dumping=true;
+        log(`DL01 header detected. Dump started: expecting ${dumpExpected} bytes`,'#fde68a');
+        const rem=concat.slice(idx+8); if(rem.length) appendDumpData(rem);
+        hdrBuf=new Uint8Array(0);
+        if(dumpBuf.length>=dumpExpected) finishDump();
         return;
       }
-      hdrBuf = concat.slice(Math.max(0, concat.length-7)); // keep up to 7 bytes
-      // fall through to text handling too
+      hdrBuf=concat.slice(Math.max(0,concat.length-7));
     }
 
-    // Treat as text
-    textBuf += td.decode(v, {stream:true});
+    textBuf+=td.decode(v,{stream:true});
     processTextBuf();
   }
 
   function processTextBuf(){
-    // Consume complete lines
     let pos;
-    while((pos = textBuf.indexOf('\n')) !== -1){
-      const raw = textBuf.slice(0,pos);
-      textBuf = textBuf.slice(pos+1);
-      const line = raw.trim();
-      if (!line) continue;
+    while((pos=textBuf.indexOf('\n'))!==-1){
+      const raw=textBuf.slice(0,pos); textBuf=textBuf.slice(pos+1);
+      const line=raw.trim(); if(!line) continue;
 
-      // JSON?
-      if (line[0]==='{' && line[line.length-1]==='}'){
+      if(line[0]==='{' && line[line.length-1]==='}'){
         try{
-          const obj = JSON.parse(line);
-          if (obj && obj.type === 'summary'){
-            applySummary(obj);
-            log('Summary parsed & applied.', '#93c5fd');
-            continue;
-          }
-          // Show other JSON
-          log(line, '#cbd5e1');
-          continue;
-        }catch(err){
-          log('JSON parse error: '+err, '#fca5a5');
-        }
+          // Defensive: accept NaN/Infinity if ever sent
+          const safe=line.replace(/\bNaN\b/gi,'null').replace(/\b-?Infinity\b/gi,'null');
+          const obj=JSON.parse(safe);
+          if(obj && obj.type==='summary'){ applySummary(obj); log('Summary parsed & applied.','#93c5fd'); continue; }
+          log(line,'#cbd5e1'); continue;
+        }catch(err){ log('JSON parse error: '+err,'#fca5a5'); }
       }
-
-      // Plain text
       log(line);
     }
   }
 
   function applySummary(obj){
-    // Numbers may be NaN (pressure/apex if no baro) — that’s fine
-    if (Number.isFinite(obj.apex_m))    apexEl.textContent  = obj.apex_m.toFixed(2);     else apexEl.textContent = '—';
-    if (typeof obj.samples === 'number')samplesEl.textContent = obj.samples;            else samplesEl.textContent = '—';
-    if (Number.isFinite(obj.a_peak_g))  apeakEl.textContent = obj.a_peak_g.toFixed(3);  else apeakEl.textContent  = '—';
-    if (Number.isFinite(obj.w_peak_dps))wpeakEl.textContent = obj.w_peak_dps.toFixed(1);else wpeakEl.textContent  = '—';
-    if (typeof obj.duration_ms==='number') durEl.textContent = obj.duration_ms;         else durEl.textContent    = '—';
-    if (Number.isFinite(obj.p_drop_Pa)) pdropEl.textContent = obj.p_drop_Pa.toFixed(1); else pdropEl.textContent  = '—';
+    apexEl.textContent   = Number.isFinite(obj.apex_m)     ? obj.apex_m.toFixed(2)   : '—';
+    samplesEl.textContent= typeof obj.samples==='number'   ? obj.samples            : '—';
+    apeakEl.textContent  = Number.isFinite(obj.a_peak_g)   ? obj.a_peak_g.toFixed(3): '—';
+    wpeakEl.textContent  = Number.isFinite(obj.w_peak_dps) ? obj.w_peak_dps.toFixed(1): '—';
+    durEl.textContent    = typeof obj.duration_ms==='number' ? obj.duration_ms      : '—';
+    pdropEl.textContent  = Number.isFinite(obj.p_drop_Pa)  ? obj.p_drop_Pa.toFixed(1): '—';
   }
 
-  // Send helper
   async function sendCmd(s){
-    if (!rxChar) return;
-    const enc = new TextEncoder();
-    const data = enc.encode(s+"\n");
-    for (let i=0;i<data.length;i+=200){
+    if(!rxChar) return;
+    const enc=new TextEncoder();
+    const data=enc.encode(s+"\n");
+    for(let i=0;i<data.length;i+=200){
       await rxChar.writeValueWithoutResponse(data.slice(i,i+200));
       await new Promise(r=>setTimeout(r,6));
     }
   }
 
-  // UI bindings with debug
-  btnConnect.addEventListener('click', async()=>{
-    if (!connected){ log('Connect button clicked'); await connect(); }
-    else { log('Disconnect button clicked'); await disconnect(); }
-  });
+  btnConnect.addEventListener('click', async()=>{ if(!connected){ log('Connect button clicked'); await connect(); } else { log('Disconnect button clicked'); await disconnect(); }});
   btnRearm.addEventListener('click', ()=>{ log('Rearm button clicked'); sendCmd('REARM'); });
   btnSummary.addEventListener('click', ()=>{ log('Summary button clicked'); log('Sending "SUMMARY" (8B)…'); sendCmd('SUMMARY'); log('"SUMMARY" sent; awaiting response…'); });
-  btnDump.addEventListener('click', ()=>{
-    log('Dump button clicked');
-    btnSave.style.display='none';
-    dumping=false; dumpExpected=0; dumpBuf=new Uint8Array(0);
-    userAskedDump=true; hdrBuf=new Uint8Array(0);
-    log('DUMP sent (waiting for DL01 header)…');
-    sendCmd('DUMP');
-  });
+  btnDump.addEventListener('click', ()=>{ log('Dump button clicked'); btnSave.style.display='none'; dumping=false; dumpExpected=0; dumpBuf=new Uint8Array(0); userAskedDump=true; hdrBuf=new Uint8Array(0); log('DUMP sent (waiting for DL01 header)…'); sendCmd('DUMP'); });
   btnErase.addEventListener('click', ()=>{ log('Erase button clicked'); sendCmd('ERASE'); });
 
-  // Web Bluetooth available?
-  if (!('bluetooth' in navigator)){
-    log('Web Bluetooth not supported in this browser.', '#fca5a5');
-    btnConnect.disabled = true;
-  }
+  if(!('bluetooth'in navigator)){ log('Web Bluetooth not supported in this browser.','#fca5a5'); btnConnect.disabled=true; }
 })();
 </script>
 </body>
