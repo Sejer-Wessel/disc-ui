@@ -504,7 +504,7 @@ h1{margin:0;font-size:18px}
 
       function toKmh(s){ return s*3.6; }
       var peakSp = -1; for(i=0;i<speed.length;i++) if (speed[i]>peakSp) peakSp=speed[i];
-      var w50 = Math.max(1, Math.floor(0.05/Math.max(0.01, (t[t.length-1]-t[0])/(t.length-1)))));
+      var w50 = Math.max(1, Math.floor(0.05/Math.max(0.01, (t[t.length-1]-t[0])/(t.length-1))));
       var j0=Math.max(0,ir-w50), j1=Math.min(speed.length, ir+w50+1);
       var releaseSp=-1; for(i=j0;i<j1;i++) if (speed[i]>releaseSp) releaseSp=speed[i];
       var dx=p[p.length-1][0]-p[0][0], dy=p[p.length-1][1]-p[0][1];
