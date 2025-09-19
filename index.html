@@ -30,7 +30,9 @@ h1{margin:0;font-size:18px}
 .log{height:220px;overflow:auto;background:#0b1020;color:#dbeafe;border-radius:8px;padding:10px;font-size:13px;white-space:pre-wrap}
 .badge{display:inline-block;padding:3px 8px;border-radius:999px;border:1px solid var(--border);font-size:12px;color:var(--muted);background:#fff}
 .footer{padding:10px 14px;color:var(--muted);font-size:12px}
-#viz{height:520px;min-height:420px}
+#viz{height:620px;min-height:420px}
+/* Make wide cards span full grid width when space allows */
+@media (min-width:1200px){.span-2{grid-column:1 / -1}}
 .small{font-size:12px;color:var(--muted)}
 </style>
 </head>
@@ -84,7 +86,7 @@ h1{margin:0;font-size:18px}
   </section>
 
   <!-- Visualization -->
-  <section class="card">
+  <section class="card span-2">
     <div class="pad">
       <div class="row" style="justify-content:space-between;align-items:center">
         <h2 style="margin:0;font-size:16px">3D Visualization</h2>
