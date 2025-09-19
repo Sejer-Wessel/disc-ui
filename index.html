@@ -4,8 +4,8 @@
 <meta charset="utf-8"/>
 <meta http-equiv="x-ua-compatible" content="IE=edge"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
-<title>Disc Throw — BLE + 3D Viz (v1.4)</title>
-<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<title>Disc Throw — BLE + 3D Viz (v1.5, optimized)</title>
+<link rel="preconnect" href="https://cdn.plot.ly"/>
 <style>
 :root{--bg:#f7f8fb;--card:#fff;--text:#111;--muted:#666;--accent:#2563eb;--ok:#16a34a;--warn:#d97706;--err:#dc2626;--border:#e5e7eb}
 *{box-sizing:border-box}
@@ -37,7 +37,7 @@ h1{margin:0;font-size:18px}
 <body>
 <header>
   <div class="row" style="justify-content:space-between;gap:8px">
-    <h1>Disc Throw — BLE + 3D Viz <span class="small">v1.4</span></h1>
+    <h1>Disc Throw — BLE + 3D Viz <span class="small">v1.5</span></h1>
     <div class="row">
       <span id="devName" class="badge">disconnected</span>
       <button id="btnConnect" class="btn primary">Connect</button>
@@ -46,7 +46,6 @@ h1{margin:0;font-size:18px}
 </header>
 
 <main class="wrap">
-
   <!-- Summary -->
   <section class="card">
     <div class="pad">
@@ -100,7 +99,6 @@ h1{margin:0;font-size:18px}
       <div id="viz"></div>
     </div>
   </section>
-
 </main>
 
 <div class="footer">
@@ -111,151 +109,169 @@ h1{margin:0;font-size:18px}
 (function(){
   "use strict";
 
+  /* ================= PERF/UTIL ================= */
+  const G = 9.80665;
+  const td = new TextDecoder();
+  const isHTTPS = (location.protocol === 'https:' || location.hostname === 'localhost');
+  const supportsBLE = ('bluetooth' in navigator);
+
+  // Defer-load Plotly only when needed
+  let plotlyReady = null;
+  function loadPlotly(){
+    if (plotlyReady) return plotlyReady;
+    plotlyReady = new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = 'https://cdn.plot.ly/plotly-2.35.2.min.js';
+      s.async = true;
+      s.onload = () => resolve(window.Plotly);
+      s.onerror = () => reject(new Error('Failed to load Plotly'));
+      document.head.appendChild(s);
+    });
+    return plotlyReady;
+  }
+
   /* ================= BASIC UI/STATE ================= */
+  const NUS_SERVICE='6e400001-b5a3-f393-e0a9-e50e24dcca9e';
+  const NUS_RX='6e400002-b5a3-f393-e0a9-e50e24dcca9e';
+  const NUS_TX='6e400003-b5a3-f393-e0a9-e50e24dcca9e';
 
-  var NUS_SERVICE='6e400001-b5a3-f393-e0a9-e50e24dcca9e';
-  var NUS_RX='6e400002-b5a3-f393-e0a9-e50e24dcca9e';
-  var NUS_TX='6e400003-b5a3-f393-e0a9-e50e24dcca9e';
+  const logEl = document.getElementById('log');
+  const devNameEl = document.getElementById('devName');
+  const btnConnect = document.getElementById('btnConnect');
+  const btnRearm = document.getElementById('btnRearm');
+  const btnSummary = document.getElementById('btnSummary');
+  const btnDump = document.getElementById('btnDump');
+  const btnErase = document.getElementById('btnErase');
+  const btnSave = document.getElementById('btnSave');
 
-  var logEl = document.getElementById('log');
-  var devNameEl = document.getElementById('devName');
-  var btnConnect = document.getElementById('btnConnect');
-  var btnRearm = document.getElementById('btnRearm');
-  var btnSummary = document.getElementById('btnSummary');
-  var btnDump = document.getElementById('btnDump');
-  var btnErase = document.getElementById('btnErase');
-  var btnSave = document.getElementById('btnSave');
+  const apexEl = document.getElementById('apex');
+  const samplesEl = document.getElementById('samples');
+  const apeakEl = document.getElementById('apeak');
+  const wpeakEl = document.getElementById('wpeak');
+  const durEl   = document.getElementById('dur');
+  const pdropEl = document.getElementById('pdrop');
 
-  var apexEl = document.getElementById('apex');
-  var samplesEl = document.getElementById('samples');
-  var apeakEl = document.getElementById('apeak');
-  var wpeakEl = document.getElementById('wpeak');
-  var durEl   = document.getElementById('dur');
-  var pdropEl = document.getElementById('pdrop');
+  const btnViz = document.getElementById('btnViz');
+  const fileBin = document.getElementById('fileBin');
+  const btnCSV = document.getElementById('btnCSV');
+  const btnPNG = document.getElementById('btnPNG');
+  const vizStatus = document.getElementById('vizStatus');
+  const vizDiv = document.getElementById('viz');
 
-  var btnViz = document.getElementById('btnViz');
-  var fileBin = document.getElementById('fileBin');
-  var btnCSV = document.getElementById('btnCSV');
-  var btnPNG = document.getElementById('btnPNG');
-  var vizStatus = document.getElementById('vizStatus');
-  var vizDiv = document.getElementById('viz');
-
-  var device, server, rxChar, txChar, connected=false;
-  var userAskedDump=false, dumping=false, dumpExpected=0;
-  var dumpBuf=new Uint8Array(0), hdrBuf=new Uint8Array(0);
-  var td=new TextDecoder();
-  var textBuf='';
+  let device, server, rxChar, txChar, connected=false;
+  let userAskedDump=false, dumping=false, dumpExpected=0;
+  // Use chunked collection to avoid repeated reallocations
+  let dumpChunks = []; let dumpLength = 0; let hdrBuf = new Uint8Array(0);
+  let textBuf='';
 
   function log(msg,color){
-    var d=document.createElement('div');
-    d.textContent=msg;
-    if(color) d.style.color=color;
-    logEl.appendChild(d);
+    const d=document.createElement('div');
+    d.textContent=msg; if(color) d.style.color=color; logEl.appendChild(d);
+    // Keep log at a reasonable size
+    if (logEl.childElementCount>1500) logEl.firstChild.remove();
     logEl.scrollTop=logEl.scrollHeight;
   }
-  function dbg(){ return document.getElementById('dbg').checked; }
-  function hexPreview(b,m){ m=m||16; var n=Math.min(b.length,m); var s=''; for(var i=0;i<n;i++){ s+=b[i].toString(16).padStart(2,'0')+' '; } return s.trim()+(b.length>n?' …':''); }
+  const dbg = ()=> document.getElementById('dbg').checked;
+  function hexPreview(b,m=16){ const n=Math.min(b.length,m); let s=''; for(let i=0;i<n;i++) s+=b[i].toString(16).padStart(2,'0')+' '; return s.trim()+(b.length>n?' …':''); }
   function setButtons(en){ btnRearm.disabled=btnSummary.disabled=btnDump.disabled=btnErase.disabled=!en; }
   function uiConnected(name){ connected=true; devNameEl.textContent=name||'connected'; devNameEl.style.borderColor='#16a34a'; devNameEl.style.color='#16a34a'; btnConnect.textContent='Disconnect'; setButtons(true); }
   function uiDisconnected(){ connected=false; devNameEl.textContent='disconnected'; devNameEl.style.borderColor='#e5e7eb'; devNameEl.style.color='#666'; btnConnect.textContent='Connect'; setButtons(false); }
 
   /* ================= ENV CHECKS ================= */
-  if (!('bluetooth' in navigator)) log('Web Bluetooth API not found (use Chrome/Edge).', '#fca5a5');
-  if (location.protocol !== 'https:' && location.hostname !== 'localhost') log('Page is not HTTPS (required for Web Bluetooth).', '#fca5a5');
+  if (!supportsBLE) log('Web Bluetooth API not found (use Chrome/Edge).', '#fca5a5');
+  if (!isHTTPS) log('Page is not HTTPS (required for Web Bluetooth).', '#fca5a5');
   log('UA: ' + navigator.userAgent, '#94a3b8');
   log('Origin: ' + location.origin, '#94a3b8');
 
   /* ================= CONNECT/DISCONNECT ================= */
-  btnConnect.addEventListener('click', function(){
+  btnConnect.addEventListener('click', () => {
     log('Connect button clicked');
     try{
-      if (!('bluetooth' in navigator)){ alert('Web Bluetooth not in this browser. Use Chrome/Edge.'); return; }
-      if (location.protocol !== 'https:' && location.hostname !== 'localhost'){ alert('This page is not HTTPS/localhost.'); return; }
+      if (!supportsBLE){ alert('Web Bluetooth not in this browser. Use Chrome/Edge.'); return; }
+      if (!isHTTPS){ alert('This page is not HTTPS/localhost.'); return; }
       if (!connected){ doConnect(); } else { doDisconnect(); }
-    }catch(e){ log('Connect click error: '+e, '#fca5a5'); alert('Connect error:\\n'+e); }
+    }catch(e){ log('Connect click error: '+e, '#fca5a5'); alert('Connect error:\n'+e); }
   });
 
-  function doConnect(){
+  async function doConnect(){
     log('Opening Bluetooth chooser…');
-    navigator.bluetooth.requestDevice({
-      filters: [{ services: [NUS_SERVICE] }],
-      optionalServices: [NUS_SERVICE]
-    }).then(function(dev){
+    try{
+      const dev = await navigator.bluetooth.requestDevice({
+        filters: [{ services: [NUS_SERVICE] }], optionalServices: [NUS_SERVICE]
+      });
       log('Chooser returned: ' + (dev && (dev.name || '(no name)')));
-      device=dev;
-      device.addEventListener('gattserverdisconnected', onDisconnected);
-      return device.gatt.connect();
-    }).then(function(s){
-      server=s;
-      return server.getPrimaryService(NUS_SERVICE);
-    }).then(function(svc){
-      return Promise.all([svc.getCharacteristic(NUS_RX), svc.getCharacteristic(NUS_TX)]);
-    }).then(function(chars){
-      rxChar=chars[0]; txChar=chars[1];
-      return txChar.startNotifications();
-    }).then(function(){
+      device=dev; device.addEventListener('gattserverdisconnected', onDisconnected);
+      server = await device.gatt.connect();
+      const svc = await server.getPrimaryService(NUS_SERVICE);
+      [rxChar, txChar] = await Promise.all([svc.getCharacteristic(NUS_RX), svc.getCharacteristic(NUS_TX)]);
+      await txChar.startNotifications();
       txChar.addEventListener('characteristicvaluechanged', onTxNotify);
       uiConnected(device.name || 'DiscThrower');
       log('Connected to ' + (device.name || 'DiscThrower'));
-    }).catch(function(e){
-      log('Connect error: ' + e, '#fca5a5');
-    });
+    }catch(e){ log('Connect error: ' + e, '#fca5a5'); }
   }
   function doDisconnect(){ try{ if (device && device.gatt.connected) device.gatt.disconnect(); }catch(e){} uiDisconnected(); }
   function onDisconnected(){ log('Disconnected', '#fca5a5'); uiDisconnected(); }
 
-  /* ================= SEND CMDS ================= */
+  /* ================= SEND CMDS (chunked) ================= */
   function sendCmd(s){
     if (!rxChar) return Promise.resolve();
-    var enc=new TextEncoder();
-    var data=enc.encode(s + '\n');
-    var i=0;
-    function step(){
+    const enc=new TextEncoder();
+    const data=enc.encode(s + '\n');
+    let i=0; // chunked write withoutResponse
+    const step=()=>{
       if (i>=data.length) return Promise.resolve();
-      var chunk=data.slice(i, i+200);
-      i+=200;
+      const chunk=data.slice(i, i+200); i+=200;
       return rxChar.writeValueWithoutResponse(chunk)
-        .then(function(){ return new Promise(function(r){ setTimeout(r,6); }); })
+        .then(()=> new Promise(r=> setTimeout(r,6)))
         .then(step);
-    }
+    };
     return step();
   }
 
-  /* ================= DUMP HANDLING ================= */
-  function appendDumpData(arr){
-    var old=dumpBuf;
-    dumpBuf=new Uint8Array(old.length+arr.length);
-    dumpBuf.set(old,0);
-    dumpBuf.set(arr,old.length);
+  /* ================= DUMP HANDLING (chunked store) ================= */
+  function pushDumpChunk(arr){ dumpChunks.push(arr); dumpLength += arr.length; }
+  function concatDump(){
+    const out=new Uint8Array(dumpLength); let off=0;
+    for (const c of dumpChunks){ out.set(c, off); off+=c.length; }
+    return out;
   }
+  function resetDump(){ dumping=false; userAskedDump=false; dumpExpected=0; dumpChunks.length=0; dumpLength=0; hdrBuf=new Uint8Array(0); }
+
   function finishDump(reason){
     dumping=false; userAskedDump=false;
-    var blob=new Blob([dumpBuf],{type:'application/octet-stream'});
-    var url=URL.createObjectURL(blob);
+    const dumpBuf = concatDump();
+    const blob=new Blob([dumpBuf],{type:'application/octet-stream'});
+    const url=URL.createObjectURL(blob);
     btnSave.href=url; btnSave.style.display='inline-block';
-    var ts=new Date().toISOString().replace(/[:.]/g,'-');
+    const ts=new Date().toISOString().replace(/[:.]/g,'-');
     btnSave.download='throw_'+ts+'.bin';
-    log('Dump finished ('+dumpBuf.length+'/'+dumpExpected+') [reason='+reason+']. Tap "Save dump".', '#86efac');
-    visualizeBytes(dumpBuf).catch(function(e){ vizStatus.textContent='Viz error: '+e; });
+    log(`Dump finished (${dumpBuf.length}/${dumpExpected}) [reason=${reason}]. Tap "Save dump".`, '#86efac');
+    visualizeBytes(dumpBuf).catch(e=>{ vizStatus.textContent='Viz error: '+e; });
+    // Revoke when user navigates away
+    window.addEventListener('pagehide', ()=> URL.revokeObjectURL(url), {once:true});
   }
   function findDl01Header(b){
-    for (var i=0;i<=b.length-4;i++){
+    for (let i=0;i<=b.length-8;i++){
       if (b[i]===0x44 && b[i+1]===0x4C && b[i+2]===0x30 && b[i+3]===0x31) return i;
     }
     return -1;
   }
 
   function onTxNotify(e){
-    var v = new Uint8Array(e.target.value.buffer);
+    const v = new Uint8Array(e.target.value.buffer);
     if (dbg()) log('[notify] len='+v.length+' hex='+hexPreview(v), '#94a3b8');
 
     if (dumping){
-      appendDumpData(v);
-      if (dumpBuf.length >= dumpExpected){
-        var extra = dumpBuf.length - dumpExpected;
+      pushDumpChunk(v);
+      if (dumpLength >= dumpExpected){
+        const extra = dumpLength - dumpExpected;
         if (extra > 0){
-          var tail = dumpBuf.slice(dumpExpected);
-          dumpBuf = dumpBuf.slice(0, dumpExpected);
+          // Trim extra by rebuilding once
+          const all = concatDump();
+          const exact = all.slice(0, dumpExpected);
+          const tail  = all.slice(dumpExpected);
+          resetDump(); pushDumpChunk(exact);
           finishDump('bytes_complete_exact');
           textBuf += td.decode(tail, {stream:true});
         } else {
@@ -266,50 +282,39 @@ h1{margin:0;font-size:18px}
     }
 
     if (userAskedDump){
-      var concat = new Uint8Array(hdrBuf.length + v.length);
+      const concat = new Uint8Array(hdrBuf.length + v.length);
       concat.set(hdrBuf, 0); concat.set(v, hdrBuf.length);
-      var idx = findDl01Header(concat);
+      const idx = findDl01Header(concat);
       if (idx !== -1 && concat.length >= idx+8){
-        var off = idx + 4;
+        const off = idx + 4;
         dumpExpected = concat[off] | (concat[off+1]<<8) | (concat[off+2]<<16) | (concat[off+3]<<24);
-        dumpBuf = new Uint8Array(0);
-        dumping = true;
-        log('DL01 header detected. Dump started: expecting '+dumpExpected+' bytes', '#fde68a');
-        var rem = concat.slice(idx+8);
-        if (rem.length) appendDumpData(rem);
-        hdrBuf = new Uint8Array(0);
-        if (dumpBuf.length >= dumpExpected) finishDump('bytes_complete_exact');
+        resetDump(); dumping = true; log('DL01 header detected. Dump started: expecting '+dumpExpected+' bytes', '#fde68a');
+        const rem = concat.slice(idx+8); if (rem.length) pushDumpChunk(rem);
+        if (dumpLength >= dumpExpected) finishDump('bytes_complete_exact');
         return;
       }
       hdrBuf = concat.slice(Math.max(0, concat.length - 7));
     }
 
+    // Text path (JSON lines)
     textBuf += td.decode(v, {stream:true});
     processTextBuf();
   }
 
   function processTextBuf(){
-    var pos;
+    let pos;
     while ((pos = textBuf.indexOf('\n')) !== -1){
-      var raw = textBuf.slice(0, pos);
-      textBuf = textBuf.slice(pos+1);
-      var line = raw.trim();
-      if (!line) continue;
-
+      const raw = textBuf.slice(0, pos); textBuf = textBuf.slice(pos+1);
+      const line = raw.trim(); if (!line) continue;
       if (line.charAt(0)==='{' && line.charAt(line.length-1)==='}'){
         try{
-          var safe = line.replace(/\bNaN\b/gi,'null').replace(/\b-?Infinity\b/gi,'null');
-          var obj = JSON.parse(safe);
+          const safe = line.replace(/\bNaN\b/gi,'null').replace(/\b-?Infinity\b/gi,'null');
+          const obj = JSON.parse(safe);
           if (obj && obj.type==='summary'){ applySummary(obj); log('Summary parsed & applied.','#93c5fd'); continue; }
           if (obj && obj.type==='dump_done'){ log('Dump done message received from device.','#86efac'); continue; }
-          log(line, '#cbd5e1');
-          continue;
-        }catch(err){
-          log('JSON parse error: ' + err, '#fca5a5');
-        }
-      } else {
-        log(line);
-      }
+          log(line, '#cbd5e1'); continue;
+        }catch(err){ log('JSON parse error: ' + err, '#fca5a5'); }
+      } else { log(line); }
     }
   }
 
@@ -323,64 +328,62 @@ h1{margin:0;font-size:18px}
   }
 
   /* ================= UI BINDINGS ================= */
-  btnRearm.addEventListener('click', function(){ log('Rearm button clicked'); sendCmd('REARM'); });
-  btnSummary.addEventListener('click', function(){ log('Summary button clicked'); log('Sending "SUMMARY" (8B)…'); sendCmd('SUMMARY'); log('"SUMMARY" sent; awaiting response…'); });
-  btnDump.addEventListener('click', function(){ log('Dump button clicked'); btnSave.style.display='none'; dumping=false; dumpExpected=0; dumpBuf=new Uint8Array(0); userAskedDump=true; hdrBuf=new Uint8Array(0); log('DUMP sent (waiting for DL01 header)…'); sendCmd('DUMP'); });
-  btnErase.addEventListener('click', function(){ log('Erase button clicked'); sendCmd('ERASE'); });
+  btnRearm.addEventListener('click', ()=>{ log('Rearm button clicked'); sendCmd('REARM'); });
+  btnSummary.addEventListener('click', ()=>{ log('Summary button clicked'); log('Sending "SUMMARY" (8B)…'); sendCmd('SUMMARY'); log('"SUMMARY" sent; awaiting response…'); });
+  btnDump.addEventListener('click', ()=>{ log('Dump button clicked'); btnSave.style.display='none'; resetDump(); userAskedDump=true; log('DUMP sent (waiting for DL01 header)…'); sendCmd('DUMP'); });
+  btnErase.addEventListener('click', ()=>{ log('Erase button clicked'); sendCmd('ERASE'); });
 
   /* ================= 3D VIZ ================= */
-  var G = 9.80665;
   function fmt(x,d){ return isFinite(x) ? Number(x).toFixed(d) : '—'; }
 
   function stripHeaderIfAny(bytes){
     if (bytes.length>=8 && bytes[0]===0x44 && bytes[1]===0x4c && bytes[2]===0x30 && bytes[3]===0x31){
-      var sz = bytes[4] | (bytes[5]<<8) | (bytes[6]<<16) | (bytes[7]<<24);
+      const sz = bytes[4] | (bytes[5]<<8) | (bytes[6]<<16) | (bytes[7]<<24);
       return bytes.slice(8, 8+sz);
     }
     return bytes;
   }
   function parseRecords(buf){
-    var rec=4+2*6+4;
-    var n=Math.floor(buf.length/rec);
-    var ms=new Uint32Array(n);
-    var ax=new Float64Array(n), ay=new Float64Array(n), az=new Float64Array(n);
-    var gx=new Float64Array(n), gy=new Float64Array(n), gz=new Float64Array(n);
-    var p =new Float64Array(n);
-    var dv=new DataView(buf.buffer, buf.byteOffset, n*rec);
-    var o=0;
-    for (var i=0;i<n;i++){
+    const rec=4+2*6+4; // 4 bytes ms, 6x int16, 4 bytes float
+    const n=(buf.length/rec)|0; // truncate
+    const ms=new Uint32Array(n);
+    const ax=new Float64Array(n), ay=new Float64Array(n), az=new Float64Array(n);
+    const gx=new Float64Array(n), gy=new Float64Array(n), gz=new Float64Array(n);
+    const p =new Float64Array(n);
+    const dv=new DataView(buf.buffer, buf.byteOffset, n*rec);
+    let o=0;
+    for (let i=0;i<n;i++){
       ms[i]=dv.getUint32(o,true); o+=4;
       ax[i]=dv.getInt16(o,true)/100; o+=2; ay[i]=dv.getInt16(o,true)/100; o+=2; az[i]=dv.getInt16(o,true)/100; o+=2;
       gx[i]=dv.getInt16(o,true)/100; o+=2; gy[i]=dv.getInt16(o,true)/100; o+=2; gz[i]=dv.getInt16(o,true)/100; o+=2;
       p[i]=dv.getFloat32(o,true); o+=4;
     }
-    return {ms:ms,ax:ax,ay:ay,az:az,gx:gx,gy:gy,gz:gz,p:p};
+    return {ms,ax,ay,az,gx,gy,gz,p};
   }
   function complementaryRPY(ax,ay,az,gx,gy,gz,dt,tau){
-    var n=dt.length, roll=new Float64Array(n), pitch=new Float64Array(n), yaw=new Float64Array(n);
-    var gxr=new Float64Array(n), gyr=new Float64Array(n), gzr=new Float64Array(n);
-    var i;
-    for(i=0;i<n;i++){ gxr[i]=gx[i]*Math.PI/180; gyr[i]=gy[i]*Math.PI/180; gzr[i]=gz[i]*Math.PI/180; }
+    const n=dt.length, roll=new Float64Array(n), pitch=new Float64Array(n), yaw=new Float64Array(n);
+    const gxr=new Float64Array(n), gyr=new Float64Array(n), gzr=new Float64Array(n);
+    for(let i=0;i<n;i++){ gxr[i]=gx[i]*Math.PI/180; gyr[i]=gy[i]*Math.PI/180; gzr[i]=gz[i]*Math.PI/180; }
     roll[0]=Math.atan2(ay[0],az[0]);
     pitch[0]=Math.atan2(-ax[0], Math.hypot(ay[0],az[0]));
-    for (i=1;i<n;i++){
-      var a=tau/(tau+dt[i]);
-      var roll_g = roll[i-1] + gxr[i]*dt[i];
-      var pitch_g= pitch[i-1] + gyr[i]*dt[i];
+    for (let i=1;i<n;i++){
+      const a=tau/(tau+dt[i]);
+      const roll_g = roll[i-1] + gxr[i]*dt[i];
+      const pitch_g= pitch[i-1] + gyr[i]*dt[i];
       yaw[i] = yaw[i-1] + gzr[i]*dt[i];
-      var roll_a = Math.atan2(ay[i],az[i]);
-      var pitch_a= Math.atan2(-ax[i], Math.hypot(ay[i],az[i]));
+      const roll_a = Math.atan2(ay[i],az[i]);
+      const pitch_a= Math.atan2(-ax[i], Math.hypot(ay[i],az[i]));
       roll[i]  = a*roll_g  + (1-a)*roll_a;
       pitch[i] = a*pitch_g + (1-a)*pitch_a;
     }
-    return {roll:roll, pitch:pitch, yaw:yaw};
+    return {roll, pitch, yaw};
   }
   function rotationMats(roll,pitch,yaw){
-    var n=roll.length, R=new Array(n);
-    for (var i=0;i<n;i++){
-      var cr=Math.cos(roll[i]), sr=Math.sin(roll[i]);
-      var cp=Math.cos(pitch[i]), sp=Math.sin(pitch[i]);
-      var cy=Math.cos(yaw[i]), sy=Math.sin(yaw[i]);
+    const n=roll.length, R=new Array(n);
+    for (let i=0;i<n;i++){
+      const cr=Math.cos(roll[i]), sr=Math.sin(roll[i]);
+      const cp=Math.cos(pitch[i]), sp=Math.sin(pitch[i]);
+      const cy=Math.cos(yaw[i]), sy=Math.sin(yaw[i]);
       R[i]=[
         [cy*cp,          cy*sp*sr - sy*cr,  cy*sp*cr + sy*sr],
         [sy*cp,          sy*sp*sr + cy*cr,  sy*sp*cr - cy*sr],
@@ -389,187 +392,156 @@ h1{margin:0;font-size:18px}
     }
     return R;
   }
-  function mulMV(M,v){ return [ M[0][0]*v[0]+M[0][1]*v[1]+M[0][2]*v[2], M[1][0]*v[0]+M[1][1]*v[1]+M[1][2]*v[2], M[2][0]*v[0]+M[2][1]*v[1]+M[2][2]*v[2] ]; }
+  const mulMV=(M,v)=> [ M[0][0]*v[0]+M[0][1]*v[1]+M[0][2]*v[2], M[1][0]*v[0]+M[1][1]*v[1]+M[1][2]*v[2], M[2][0]*v[0]+M[2][1]*v[1]+M[2][2]*v[2] ];
   function detectMotion(a_ms2, g_dps){
-    var n=a_ms2.length, mask=new Array(n), i;
-    for (i=0;i<n;i++){
-      var aN=Math.hypot(a_ms2[i][0],a_ms2[i][1],a_ms2[i][2])/G;
-      var gN=Math.hypot(g_dps[i][0],g_dps[i][1],g_dps[i][2]);
+    const n=a_ms2.length, mask=new Array(n);
+    for (let i=0;i<n;i++){
+      const aN=Math.hypot(a_ms2[i][0],a_ms2[i][1],a_ms2[i][2])/G;
+      const gN=Math.hypot(g_dps[i][0],g_dps[i][1],g_dps[i][2]);
       mask[i]=(gN>50)||Math.abs(aN-1)>0.15;
     }
     // smooth 9
-    var k=9, w=new Array(k), out=new Array(n);
-    for(i=0;i<k;i++) w[i]=1/k;
-    for (i=0;i<n;i++){
-      var s=0, j;
-      for (j=0;j<k;j++){
-        var x=i+j-Math.floor(k/2);
-        if (x>=0 && x<n) s += (mask[x]?1:0)*w[j];
-      }
+    const k=9, out=new Array(n);
+    for (let i=0;i<n;i++){
+      let s=0; for (let j=0;j<k;j++){ const x=i+j-Math.floor(k/2); if (x>=0 && x<n) s += (mask[x]?1:0)/k; }
       out[i]=s>0.5;
     }
     return out;
   }
   function integrateWithEndZero(a,t,move){
-    var n=t.length, v=new Array(n), p=new Array(n), i, j;
-    for (i=0;i<n;i++){ v[i]=[0,0,0]; p[i]=[0,0,0]; }
-    var dt=new Array(n); dt[0]=0; for (i=1;i<n;i++) dt[i]=t[i]-t[i-1];
-    for (i=1;i<n;i++){ for (j=0;j<3;j++){ v[i][j]=v[i-1][j]+a[i][j]*dt[i]; } }
-    var any=false; for(i=0;i<move.length;i++){ if(move[i]){ any=true; break; } }
+    const n=t.length, v=new Array(n), p=new Array(n);
+    for (let i=0;i<n;i++){ v[i]=[0,0,0]; p[i]=[0,0,0]; }
+    const dt=new Array(n); dt[0]=0; for (let i=1;i<n;i++) dt[i]=t[i]-t[i-1];
+    for (let i=1;i<n;i++){ for (let j=0;j<3;j++){ v[i][j]=v[i-1][j]+a[i][j]*dt[i]; } }
+    let any=false; for(let i=0;i<move.length;i++){ if(move[i]){ any=true; break; } }
     if (any){
-      var i0=move.indexOf(true);
-      var i1=move.length-1 - move.slice().reverse().indexOf(true);
-      var T=Math.max(t[i1]-t[i0],1e-6);
-      var drift=[ v[i1][0]/T, v[i1][1]/T, v[i1][2]/T ];
-      for (i=i0;i<=i1;i++){
-        var s=t[i]-t[i0];
-        for (j=0;j<3;j++){ v[i][j]-=s*drift[j]; }
+      const i0=move.indexOf(true);
+      const i1=move.length-1 - move.slice().reverse().indexOf(true);
+      const T=Math.max(t[i1]-t[i0],1e-6);
+      const drift=[ v[i1][0]/T, v[i1][1]/T, v[i1][2]/T ];
+      for (let i=i0;i<=i1;i++){
+        const s=t[i]-t[i0]; for (let j=0;j<3;j++) v[i][j]-=s*drift[j];
       }
-      for (i=1;i<n;i++){ for (j=0;j<3;j++){ p[i][j]=p[i-1][j]+v[i][j]*dt[i]; } }
-      var o=[ p[i0][0], p[i0][1], p[i0][2] ];
-      for (i=0;i<n;i++){ for (j=0;j<3;j++){ p[i][j]-=o[j]; } }
+      for (let i=1;i<n;i++){ for (let j=0;j<3;j++){ p[i][j]=p[i-1][j]+v[i][j]*dt[i]; } }
+      const o=[ p[i0][0], p[i0][1], p[i0][2] ];
+      for (let i=0;i<n;i++){ for (let j=0;j<3;j++) p[i][j]-=o[j]; }
     }
-    return {v:v, p:p};
+    return {v, p};
   }
   function pickReleaseIndex(t, speed){
-    var k=7, w=new Array(k), s=new Array(t.length), i;
-    for(i=0;i<k;i++) w[i]=1/k;
-    for (i=0;i<t.length;i++){
-      var m=0, j;
-      for (j=0;j<k;j++){
-        var x=i+j-Math.floor(k/2);
-        if (x>=0 && x<t.length) m += speed[x]*w[j];
-      }
+    const k=7, s=new Array(t.length);
+    for (let i=0;i<t.length;i++){
+      let m=0; for (let j=0;j<k;j++){ const x=i+j-Math.floor(k/2); if (x>=0 && x<t.length) m += speed[x]/k; }
       s[i]=m;
     }
-    var endT=t[0]+Math.min(0.30, t[t.length-1]-t[0]);
-    var endI=-1; for(i=0;i<t.length;i++){ if (t[i]>=endT){ endI=i; break; } }
-    if (endI<0) endI=t.length;
-    var mx=-1, mi=0;
-    for (i=0;i<Math.max(3,endI);i++){ if (s[i]>mx){ mx=s[i]; mi=i; } }
+    const endT=t[0]+Math.min(0.30, t[t.length-1]-t[0]);
+    let endI=t.findIndex(T=>T>=endT); if (endI<0) endI=t.length;
+    let mx=-1, mi=0; for (let i=0;i<Math.max(3,endI);i++){ if (s[i]>mx){ mx=s[i]; mi=i; } }
     return mi;
   }
-  function yawMatrix(deg){
-    var r=deg*Math.PI/180, c=Math.cos(r), s=Math.sin(r);
-    return [[c,-s,0],[s,c,0],[0,0,1]];
-  }
-  function mulYaw(M,v){ return [ M[0][0]*v[0]+M[0][1]*v[1], M[1][0]*v[0]+M[1][1]*v[1], v[2] ]; }
+  function yawMatrix(deg){ const r=deg*Math.PI/180, c=Math.cos(r), s=Math.sin(r); return [[c,-s,0],[s,c,0],[0,0,1]]; }
+  const mulYaw=(M,v)=> [ M[0][0]*v[0]+M[0][1]*v[1], M[1][0]*v[0]+M[1][1]*v[1], v[2] ];
 
-  function visualizeBytes(rawBytes){
+  async function visualizeBytes(rawBytes){
     vizStatus.textContent='Parsing…';
     try{
-      var payload = stripHeaderIfAny(new Uint8Array(rawBytes));
-      var rec = parseRecords(payload);
-      var t = new Array(rec.ms.length); var i;
-      for(i=0;i<t.length;i++) t[i]=rec.ms[i]/1000;
-      var dt=new Array(t.length); dt[0]=0; for (i=1;i<t.length;i++) dt[i]=t[i]-t[i-1];
+      const payload = stripHeaderIfAny(new Uint8Array(rawBytes));
+      const rec = parseRecords(payload);
+      const n = rec.ms.length;
+      if (!n) { vizStatus.textContent='No records to visualize.'; return; }
 
-      var rpy = complementaryRPY(rec.ax,rec.ay,rec.az,rec.gx,rec.gy,rec.gz,dt,0.5);
-      var R = rotationMats(rpy.roll, rpy.pitch, rpy.yaw);
+      const t = Array.from(rec.ms, ms=>ms/1000);
+      const dt = new Array(n); dt[0]=0; for (let i=1;i<n;i++) dt[i]=t[i]-t[i-1];
 
-      var aBody = new Array(rec.ax.length);
-      for(i=0;i<aBody.length;i++) aBody[i]=[rec.ax[i],rec.ay[i],rec.az[i]];
-      var aWorld = new Array(aBody.length);
-      for(i=0;i<aWorld.length;i++) aWorld[i]=mulMV(R[i],aBody[i]);
-      var aLin = new Array(aWorld.length);
-      for(i=0;i<aLin.length;i++) aLin[i]=[aWorld[i][0],aWorld[i][1],aWorld[i][2]-G];
+      const rpy = complementaryRPY(rec.ax,rec.ay,rec.az,rec.gx,rec.gy,rec.gz,dt,0.5);
+      const R = rotationMats(rpy.roll, rpy.pitch, rpy.yaw);
 
-      var g3=new Array(rec.gx.length);
-      for(i=0;i<g3.length;i++) g3[i]=[rec.gx[i],rec.gy[i],rec.gz[i]];
+      const aBody = Array.from({length:n}, (_,i)=> [rec.ax[i],rec.ay[i],rec.az[i]]);
+      const aWorld = aBody.map((v,i)=> mulMV(R[i],v));
+      const aLin = aWorld.map(v=> [v[0], v[1], v[2]-G]);
 
-      var move = detectMotion(aBody, g3);
-      var ip = integrateWithEndZero(aLin, t, move);
-      var v = ip.v, p = ip.p;
+      const g3 = Array.from({length:n}, (_,i)=> [rec.gx[i],rec.gy[i],rec.gz[i]]);
+      const move = detectMotion(aBody, g3);
+      const {v, p} = integrateWithEndZero(aLin, t, move);
 
-      var speed = new Array(v.length);
-      for(i=0;i<speed.length;i++) speed[i]=Math.hypot(v[i][0],v[i][1],v[i][2])+1e-12;
-      var ir = pickReleaseIndex(t, speed);
+      const speed = v.map(c=> Math.hypot(c[0],c[1],c[2])+1e-12);
+      const ir = pickReleaseIndex(t, speed);
 
       // baseline altitude
-      var valid = new Array(rec.p.length); for(i=0;i<valid.length;i++) valid[i]=isFinite(rec.p[i])&&rec.p[i]>1;
-      var p0=(function(){
-        var vv=[], j; for(j=0;j<rec.p.length;j++) if(valid[j]) vv.push(rec.p[j]);
-        var n=Math.max(5, Math.floor(vv.length/50)) || 1;
-        if (!vv.length) return 101325;
-        var sum=0; for(j=0;j<Math.min(n,vv.length);j++) sum+=vv[j];
+      const valid = rec.p.map(x=> isFinite(x) && x>1);
+      const p0=(function(){
+        const vv=[]; for(let j=0;j<rec.p.length;j++) if(valid[j]) vv.push(rec.p[j]);
+        const n=Math.max(5, Math.floor(vv.length/50)) || 1; if (!vv.length) return 101325;
+        let sum=0; for(let j=0;j<Math.min(n,vv.length);j++) sum+=vv[j];
         return sum/Math.min(n,vv.length);
       })();
-      var alt=new Array(rec.p.length);
-      for(i=0;i<alt.length;i++) alt[i]=44330*(1.0 - Math.pow((rec.p[i]/100)/(p0/100), 1/5.255));
+      const alt = rec.p.map(pi=> 44330*(1.0 - Math.pow((pi/100)/(p0/100), 1/5.255)));
 
-      var theta = Math.atan2(v[ir][1], v[ir][0])*180/Math.PI;
-      var Q = yawMatrix(-theta);
-      var pView = new Array(p.length);
-      for(i=0;i<p.length;i++) pView[i]=mulYaw(Q,p[i]);
+      const theta = Math.atan2(v[ir][1], v[ir][0])*180/Math.PI;
+      const Q = yawMatrix(-theta);
+      const pView = p.map(pt=> mulYaw(Q,pt));
 
-      function toKmh(s){ return s*3.6; }
-      var peakSp = -1; for(i=0;i<speed.length;i++) if (speed[i]>peakSp) peakSp=speed[i];
-      var w50 = Math.max(1, Math.floor(0.05/Math.max(0.01, (t[t.length-1]-t[0])/(t.length-1))));
-      var j0=Math.max(0,ir-w50), j1=Math.min(speed.length, ir+w50+1);
-      var releaseSp=-1; for(i=j0;i<j1;i++) if (speed[i]>releaseSp) releaseSp=speed[i];
-      var dx=p[p.length-1][0]-p[0][0], dy=p[p.length-1][1]-p[0][1];
-      var carry=Math.hypot(dx,dy);
-      var mx=-1; for(i=0;i<alt.length;i++) if (alt[i]>mx) mx=alt[i];
-      var apex = (mx - alt[0]) || 0;
-      var hang  = t[t.length-1] - t[0];
+      const toKmh = s=> s*3.6;
+      const peakSp = speed.reduce((m,x)=> x>m?x:m, -1);
+      const sampleDt = Math.max(0.01, (t[t.length-1]-t[0])/(t.length-1));
+      const w50 = Math.max(1, Math.floor(0.05/sampleDt));
+      const j0=Math.max(0,ir-w50), j1=Math.min(speed.length, ir+w50+1);
+      let releaseSp=-1; for(let i=j0;i<j1;i++) if (speed[i]>releaseSp) releaseSp=speed[i];
+      const dx=p[p.length-1][0]-p[0][0], dy=p[p.length-1][1]-p[0][1];
+      const carry=Math.hypot(dx,dy);
+      const mx = alt.reduce((m,x)=> x>m?x:m, -1);
+      const apex = (mx - alt[0]) || 0;
+      const hang  = t[t.length-1] - t[0];
 
-      if (samplesEl.textContent==='—') samplesEl.textContent=rec.ms.length;
+      if (samplesEl.textContent==='—') samplesEl.textContent=n;
       if (durEl.textContent==='—')     durEl.textContent=Math.round(hang*1000);
       if (apexEl.textContent==='—')    apexEl.textContent=fmt(apex,2);
 
       vizStatus.textContent='Rendering…';
-      var xs=new Array(pView.length), ys=new Array(pView.length), zs=new Array(pView.length);
-      for(i=0;i<pView.length;i++){ xs[i]=pView[i][0]; ys[i]=pView[i][1]; zs[i]=pView[i][2]; }
-      function rng(a){ var lo=Infinity, hi=-Infinity, k; for(k=0;k<a.length;k++){ if(a[k]<lo) lo=a[k]; if(a[k]>hi) hi=a[k]; } return (hi>lo)?[lo,hi]:[-1,1]; }
+      const xs = pView.map(r=>r[0]);
+      const ys = pView.map(r=>r[1]);
+      const zs = pView.map(r=>r[2]);
+      const rng=a=> { let lo=Infinity, hi=-Infinity; for(const v of a){ if(v<lo) lo=v; if(v>hi) hi=v; } return (hi>lo)?[lo,hi]:[-1,1]; };
 
-      var data = [
+      await loadPlotly();
+      const data = [
         {type:'scatter3d', mode:'lines', x:xs, y:ys, z:zs, line:{width:6}, name:'This throw'},
         {type:'scatter3d', mode:'markers', x:[xs[ir]], y:[ys[ir]], z:[zs[ir]], marker:{size:6,symbol:'diamond'}, name:'Release'},
         {type:'scatter3d', mode:'markers', x:[xs[xs.length-1]], y:[ys[ys.length-1]], z:[zs[zs.length-1]], marker:{size:6,symbol:'x'}, name:'End'}
       ];
-      Plotly.newPlot(vizDiv, data, {
+      await Plotly.newPlot(vizDiv, data, {
         scene:{xaxis:{title:'X (m)',range:rng(xs)}, yaxis:{title:'Y (m)',range:rng(ys)}, zaxis:{title:'Z (m)',range:rng(zs)}, aspectmode:'data'},
         margin:{l:0,r:0,t:30,b:0},
         title:'Flight — release '+fmt(toKmh(releaseSp),1)+' km/h · peak '+fmt(toKmh(peakSp),1)+' km/h · carry '+fmt(carry,1)+' m · apex '+fmt(apex,1)+' m'
-      }, {responsive:true}).then(function(){ vizStatus.textContent='Done.'; });
+      }, {responsive:true});
+      vizStatus.textContent='Done.';
 
-      var rows=["t_s,x_m,y_m,z_m,vx,vy,vz,axw,ayw,azw,alt_m"];
-      for (i=0;i<t.length;i++){
-        rows.push([t[i], pView[i][0], pView[i][1], pView[i][2],
-                   v[i][0], v[i][1], v[i][2],
-                   aWorld[i][0], aWorld[i][1], aWorld[i][2],
-                   alt[i]].join(","));
+      // CSV
+      const rows=["t_s,x_m,y_m,z_m,vx,vy,vz,axw,ayw,azw,alt_m"];
+      for (let i=0;i<n;i++){
+        rows.push([t[i], pView[i][0], pView[i][1], pView[i][2], v[i][0], v[i][1], v[i][2], aWorld[i][0], aWorld[i][1], aWorld[i][2], alt[i]].join(","));
       }
-      var csvBlob=new Blob([rows.join("\n")], {type:'text/csv'});
-      btnCSV.href=URL.createObjectURL(csvBlob);
-      btnCSV.style.display='inline-block';
+      const csvBlob=new Blob([rows.join("\n")], {type:'text/csv'});
+      const csvUrl=URL.createObjectURL(csvBlob);
+      btnCSV.href=csvUrl; btnCSV.style.display='inline-block';
+      window.addEventListener('pagehide', ()=> URL.revokeObjectURL(csvUrl), {once:true});
+
+      // PNG
       btnPNG.onclick=function(){
-        Plotly.toImage(vizDiv,{format:'png',width:1200,height:700,scale:2})
-          .then(function(url){ btnPNG.href=url; });
+        Plotly.toImage(vizDiv,{format:'png',width:1200,height:700,scale:2}).then(url=>{ btnPNG.href=url; });
       };
       btnPNG.style.display='inline-block';
-    }catch(e){
-      vizStatus.textContent='Viz error: '+e;
-      throw e;
-    }
+    }catch(e){ vizStatus.textContent='Viz error: '+e; throw e; }
   }
 
-  btnViz.addEventListener('click', function(){
-    if (dumpBuf.length){ visualizeBytes(dumpBuf); }
+  btnViz.addEventListener('click', ()=>{
+    if (dumpLength){ visualizeBytes(concatDump()); }
     else { vizStatus.textContent='No dump in memory yet. Press Dump first or load a .bin.'; }
   });
-  fileBin.addEventListener('change', function(e){
-    var f = e.target.files && e.target.files[0];
-    if (!f) return;
-    f.arrayBuffer().then(function(b){ visualizeBytes(new Uint8Array(b)); });
+  fileBin.addEventListener('change', (e)=>{
+    const f = e.target.files && e.target.files[0]; if (!f) return;
+    f.arrayBuffer().then(b=> visualizeBytes(new Uint8Array(b)));
   });
-
-  /* ================= BUTTONS ================= */
-  btnRearm.addEventListener('click', function(){ log('Rearm button clicked'); sendCmd('REARM'); });
-  btnSummary.addEventListener('click', function(){ log('Summary button clicked'); log('Sending "SUMMARY" (8B)…'); sendCmd('SUMMARY'); log('"SUMMARY" sent; awaiting response…'); });
-  btnDump.addEventListener('click', function(){ log('Dump button clicked'); btnSave.style.display='none'; dumping=false; dumpExpected=0; dumpBuf=new Uint8Array(0); userAskedDump=true; hdrBuf=new Uint8Array(0); log('DUMP sent (waiting for DL01 header)…'); sendCmd('DUMP'); });
-  btnErase.addEventListener('click', function(){ log('Erase button clicked'); sendCmd('ERASE'); });
-
 })();
 </script>
 </body>
