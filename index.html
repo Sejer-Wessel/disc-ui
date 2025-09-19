@@ -5,29 +5,36 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
 <title>Disc Throw — BLE</title>
 <style>
-  :root{ --bg:#f7f8fb; --card:#ffffff; --text:#111; --muted:#666; --accent:#2563eb; --ok:#16a34a; --warn:#d97706; --err:#dc2626; --border:#e5e7eb; }
+  :root{
+    --bg:#f7f8fb; --card:#ffffff; --text:#111; --muted:#666; --accent:#2563eb; --ok:#16a34a; --warn:#d97706; --err:#dc2626;
+    --border:#e5e7eb;
+  }
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
   header{padding:10px 14px;border-bottom:1px solid var(--border);background:#fff;position:sticky;top:0;z-index:2}
   h1{margin:0;font-size:18px}
   .wrap{padding:12px;display:grid;gap:12px;grid-template-columns:1fr}
-  @media (min-width:900px){ .wrap{grid-template-columns:420px 1fr;} }
+  @media (min-width: 900px){ .wrap{grid-template-columns: 420px 1fr;} }
+
   .card{background:var(--card);border:1px solid var(--border);border-radius:10px;box-shadow:0 1px 0 rgba(0,0,0,.03)}
   .card .pad{padding:14px}
   .row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
-  .btn{appearance:none;border:1px solid var(--border);background:#fff;color:var(--text);padding:10px 14px;border-radius:10px;font-weight:600;cursor:pointer;min-width:110px}
+  .btn{
+    appearance:none;border:1px solid var(--border);background:#fff;color:var(--text);
+    padding:10px 14px;border-radius:10px;font-weight:600;cursor:pointer;min-width:110px;
+  }
   .btn:disabled{opacity:.5;cursor:not-allowed}
   .btn.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
   .btn.ok{background:var(--ok);color:#fff;border-color:var(--ok)}
   .btn.warn{background:var(--warn);color:#fff;border-color:var(--warn)}
   .btn.err{background:var(--err);color:#fff;border-color:var(--err)}
-  .kvs{display:grid;grid-template-columns:repeat(2,minmax(120px,1fr));gap:8px}
+  .badge{display:inline-block;padding:3px 8px;border-radius:999px;border:1px solid var(--border);font-size:12px;color:var(--muted);background:#fff}
+  .kvs{display:grid;grid-template-columns: repeat(2, minmax(120px,1fr)); gap:8px}
   .kv{background:#fafafa;border:1px solid var(--border);border-radius:8px;padding:8px 10px}
   .kv .k{font-size:12px;color:var(--muted)}
   .kv .v{font-size:18px;font-weight:700}
   .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
   .log{height:260px;overflow:auto;background:#0b1020;color:#dbeafe;border-radius:8px;padding:10px;font-size:13px}
-  .badge{display:inline-block;padding:3px 8px;border-radius:999px;border:1px solid var(--border);font-size:12px;color:var(--muted);background:#fff}
   .footer{padding:10px 14px;color:var(--muted);font-size:12px}
 </style>
 </head>
@@ -35,7 +42,8 @@
 <header>
   <div class="row" style="justify-content:space-between;gap:8px">
     <h1>Disc Throw — BLE</h1>
-    <div class="row">
+    <div class="row" style="gap:8px">
+      <span id="fwBadge" class="badge">FW: —</span>
       <span id="devName" class="badge">disconnected</span>
       <button id="btnConnect" class="btn primary">Connect</button>
     </div>
@@ -43,7 +51,8 @@
 </header>
 
 <main class="wrap">
-  <!-- Summary -->
+
+  <!-- Summary card -->
   <section class="card">
     <div class="pad">
       <div class="row" style="justify-content:space-between;align-items:center">
@@ -67,7 +76,7 @@
     </div>
   </section>
 
-  <!-- Log -->
+  <!-- Live log & download -->
   <section class="card">
     <div class="pad">
       <div class="row" style="justify-content:space-between">
@@ -81,7 +90,7 @@
 </main>
 
 <div class="footer" id="supportNote">
-  Tip: use Chrome/Edge on desktop (HTTPS). iOS Safari doesn’t support Web Bluetooth.
+  Tip: open this page in Chrome/Edge over <b>HTTPS</b>. iOS Safari doesn’t support Web Bluetooth.
 </div>
 
 <script>
@@ -91,9 +100,10 @@
   const NUS_RX      = '6e400002-b5a3-f393-e0a9-e50e24dcca9e'; // Write
   const NUS_TX      = '6e400003-b5a3-f393-e0a9-e50e24dcca9e'; // Notify
 
-  // --- UI elements ---
+  // UI
   const logEl = document.getElementById('log');
   const devNameEl = document.getElementById('devName');
+  const fwBadge = document.getElementById('fwBadge');
   const btnConnect = document.getElementById('btnConnect');
   const btnRearm = document.getElementById('btnRearm');
   const btnSummary = document.getElementById('btnSummary');
@@ -116,11 +126,11 @@
   logEl.parentElement.appendChild(dbgBox);
   const dbg = () => document.getElementById('dbg').checked;
 
-  // BLE handles
+  // BLE
   let device, server, rxChar, txChar;
   let connected = false;
 
-  // Text buffer
+  // Buffers
   let textBuf = "";
   const td = new TextDecoder();
 
@@ -135,30 +145,10 @@
   let dumpBytesSeen = 0;
   let lastProgressPct = -1;
 
-  // NEW: detect '{"type":"dump_done"}' inside the binary stream
   const dumpDoneBytes = new TextEncoder().encode('{"type":"dump_done"}');
-  function indexOfSubarray(hay, needle) {
-    // Naive search; fine for small buffers
-    outer: for (let i = 0; i <= hay.length - needle.length; i++) {
-      for (let j = 0; j < needle.length; j++) if (hay[i + j] !== needle[j]) continue outer;
-      return i;
-    }
-    return -1;
-  }
-
-  // NEW: inactivity timeout during dump
   let dumpSilenceTimer = null;
-  function armDumpSilenceTimer() {
-    clearTimeout(dumpSilenceTimer);
-    dumpSilenceTimer = setTimeout(() => {
-      if (dumping) {
-        log(`Dump inactivity timeout — finalizing partial file (${dumpBytesSeen}/${dumpExpected}).`, '#fde68a');
-        finishDump('timeout_partial');
-      }
-    }, 2000); // 2s without new data → finish partial
-  }
 
-  // UI helpers
+  // Helpers
   function log(msg, color) {
     const line = document.createElement('div');
     line.textContent = msg;
@@ -190,6 +180,7 @@
     devNameEl.style.color = '#666';
     btnConnect.textContent = 'Connect';
     setButtons(false);
+    fwBadge.textContent = 'FW: —';
   }
 
   // Connect / disconnect
@@ -207,7 +198,7 @@
       server = await device.gatt.connect();
 
       const svc = await server.getPrimaryService(NUS_SERVICE).catch(err => {
-        log('NUS service not found on this device. Check firmware UUIDs.', '#fca5a5');
+        log('NUS service not found on this device. Check the firmware UUIDs.', '#fca5a5');
         throw err;
       });
 
@@ -220,6 +211,9 @@
       uiConnected(device.name || 'DiscThrower');
       log('Connected to ' + (device.name || 'DiscThrower'));
       log('NUS service + RX/TX characteristics acquired');
+
+      // Ask for firmware version right away
+      setTimeout(()=> sendCmd('VERSION'), 100);
     } catch (e) {
       log('Connect error: ' + e, '#fca5a5');
       try { if (device && device.gatt.connected) device.gatt.disconnect(); } catch {}
@@ -257,6 +251,15 @@
       setButtons(true); btnDump.textContent = 'Dump';
     }, 2000);
   }
+  function armDumpSilenceTimer() {
+    clearTimeout(dumpSilenceTimer);
+    dumpSilenceTimer = setTimeout(() => {
+      if (dumping) {
+        log(`Dump inactivity timeout — finalizing partial file (${dumpBytesSeen}/${dumpExpected}).`, '#fde68a');
+        finishDump('timeout_partial');
+      }
+    }, 5000); // 5s quiet → finish partial
+  }
   function enterDump(size, firstPayload) {
     awaitingHeader = false;
     clearTimeout(awaitingHeaderTimeout);
@@ -271,24 +274,25 @@
     if (firstPayload && firstPayload.length) appendDumpData(firstPayload);
     armDumpSilenceTimer();
   }
+  function indexOfSubarray(hay, needle) {
+    outer: for (let i = 0; i <= hay.length - needle.length; i++) {
+      for (let j = 0; j < needle.length; j++) if (hay[i + j] !== needle[j]) continue outer;
+      return i;
+    }
+    return -1;
+  }
   function appendDumpData(arr) {
-    // While dumping, also check for {"type":"dump_done"} inside the chunk
-    let chunk = arr;
-    // Search marker in this chunk
-    const idx = indexOfSubarray(chunk, dumpDoneBytes);
+    // Look for {"type":"dump_done"} inside the binary stream
+    const idx = indexOfSubarray(arr, dumpDoneBytes);
     if (idx !== -1) {
-      // Everything before the marker is binary payload
-      const pre = chunk.slice(0, idx);
+      const pre = arr.slice(0, idx);
       if (pre.length) appendDumpDataCore(pre);
-      // Finish early (partial) because device signaled done
       finishDump('dump_done_marker_early');
-      // Anything after the marker -> feed to text parser (likely ends with \n)
-      const post = chunk.slice(idx + dumpDoneBytes.length);
+      const post = arr.slice(idx + dumpDoneBytes.length);
       if (post.length) try { textBuf += td.decode(post, {stream:true}); } catch {}
       return;
     }
-    // No marker → just append
-    appendDumpDataCore(chunk);
+    appendDumpDataCore(arr);
   }
   function appendDumpDataCore(arr) {
     const old = dumpBuf;
@@ -297,7 +301,6 @@
     dumpBuf.set(arr, old.length);
     dumpBytesSeen += arr.length;
 
-    // progress every 10%
     if (dumpExpected > 0) {
       const pct = Math.floor((dumpBytesSeen / dumpExpected) * 100);
       if (pct >= lastProgressPct + 10 || pct === 100) {
@@ -306,7 +309,7 @@
       }
     }
     armDumpSilenceTimer();
-    // Complete if we hit expected size
+
     if (dumpBuf.length >= dumpExpected) {
       const extra = dumpBuf.length - dumpExpected;
       if (extra > 0) {
@@ -339,9 +342,20 @@
     }
   }
 
-  // JSON helper
+  // JSON handler
   function handleParsedJson(obj, rawLine) {
+    if (obj && obj.type === 'version') {
+      const label = obj.fw ? `${obj.fw}` : '—';
+      const b = obj.build ? ` @ ${obj.build}` : '';
+      fwBadge.textContent = `FW: ${label}${b}`;
+      log(`Device version: ${label}${b}`, '#bbf7d0');
+      return;
+    }
     if (obj && obj.type === 'summary') {
+      if (obj.fw) {
+        const b = obj.build ? ` @ ${obj.build}` : '';
+        fwBadge.textContent = `FW: ${obj.fw}${b}`;
+      }
       apexEl.textContent    = Number.isFinite(obj.apex_m)     ? obj.apex_m.toFixed(2)   : '—';
       samplesEl.textContent = obj.samples ?? '—';
       apeakEl.textContent   = Number.isFinite(obj.a_peak_g)   ? obj.a_peak_g.toFixed(3) : '—';
@@ -352,7 +366,6 @@
       return;
     }
     if (obj && obj.type === 'dump_done') {
-      // If this arrives in text-mode after we already finalized early, just note it
       log('Dump done message received from device.', '#bbf7d0');
       if (dumping) finishDump('dump_done_message');
       return;
@@ -367,7 +380,6 @@
 
     if (dbg()) log(`[notify] len=${v.length} hex=${hexPreview(v)}`, '#94a3b8');
 
-    // Waiting for header?
     if (awaitingHeader) {
       const maxBuf = 2048;
       let tmp = new Uint8Array(awaitingHeaderBuf.length + v.length);
@@ -386,13 +398,12 @@
       return;
     }
 
-    // Dumping?
     if (dumping) {
       appendDumpData(v);
       return;
     }
 
-    // Normal text
+    // Normal text mode
     try { textBuf += td.decode(v, {stream:true}); } catch {}
     let pos;
     while ((pos = textBuf.indexOf('\n')) !== -1) {
@@ -422,6 +433,7 @@
 
   // UI bindings
   btnConnect.addEventListener('click', async()=>{ if (!connected) await connect(); else await disconnect(); });
+
   btnRearm.addEventListener('click', ()=>{ log('Rearm button clicked'); cancelDumpModes(); sendCmd('REARM'); });
   btnSummary.addEventListener('click', ()=>{ log('Summary button clicked'); cancelDumpModes(); sendCmd('SUMMARY'); });
   btnDump.addEventListener('click', ()=>{
