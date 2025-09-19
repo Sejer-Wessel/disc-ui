@@ -256,8 +256,15 @@ h1{margin:0;font-size:18px}
   btnDump.addEventListener('click', ()=>{ log('Dump button clicked'); btnSave.style.display='none'; dumping=false; dumpExpected=0; dumpBuf=new Uint8Array(0); userAskedDump=true; hdrBuf=new Uint8Array(0); log('DUMP sent (waiting for DL01 header)…'); sendCmd('DUMP'); });
   btnErase.addEventListener('click', ()=>{ log('Erase button clicked'); sendCmd('ERASE'); });
 
-  if(!('bluetooth' in navigator)){ log('Web Bluetooth not supported in this browser.','#fca5a5'); btnConnect.disabled=true; }
-
+(function checkWebBluetoothSupport(){
+  if (!('bluetooth' in navigator)) {
+    log('Web Bluetooth API not found in this browser (try Chrome/Edge).', '#fca5a5');
+  }
+  if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
+    log('This page is not served over HTTPS (Web Bluetooth requires a secure origin).', '#fca5a5');
+  }
+  // Do NOT disable the button; we’ll show a dialog if the user clicks.
+})();
   // ========= 3D VISUALIZATION (browser-side) =========
   const G = 9.80665;
   const fmt = (x,d=1)=>Number.isFinite(x)?x.toFixed(d):'—';
