@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
-<title>Disc Throw — BLE + 3D Viz (v1.0)</title>
+<title>Disc Throw — BLE + 3D Viz (v1.1)</title>
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <style>
 :root{--bg:#f7f8fb;--card:#fff;--text:#111;--muted:#666;--accent:#2563eb;--ok:#16a34a;--warn:#d97706;--err:#dc2626;--border:#e5e7eb}
@@ -36,7 +36,7 @@ h1{margin:0;font-size:18px}
 <body>
 <header>
   <div class="row" style="justify-content:space-between;gap:8px">
-    <h1>Disc Throw — BLE + 3D Viz <span class="small">v1.0</span></h1>
+    <h1>Disc Throw — BLE + 3D Viz <span class="small">v1.1</span></h1>
     <div class="row">
       <span id="devName" class="badge">disconnected</span>
       <button id="btnConnect" class="btn primary">Connect</button>
@@ -103,7 +103,7 @@ h1{margin:0;font-size:18px}
 </main>
 
 <div class="footer">
-  Tip: open over <b>HTTPS</b> in Chrome/Edge desktop (or Safari iOS 16.4+).
+  Tip: use <b>Chrome/Edge</b> on desktop or <b>Safari iOS 16.4+</b> over HTTPS. Firmware should advertise Nordic UART (NUS).
 </div>
 
 <script>
@@ -153,9 +153,49 @@ h1{margin:0;font-size:18px}
   function uiConnected(name){connected=true;devNameEl.textContent=name||'connected';devNameEl.style.borderColor='#16a34a';devNameEl.style.color='#16a34a';btnConnect.textContent='Disconnect';setButtons(true);}
   function uiDisconnected(){connected=false;devNameEl.textContent='disconnected';devNameEl.style.borderColor='#e5e7eb';devNameEl.style.color='#666';btnConnect.textContent='Connect';setButtons(false);}
 
+  // ----- Hardening: environment diagnostics (do NOT disable button) -----
+  (function checkWebBluetoothSupport(){
+    if (!('bluetooth' in navigator)) {
+      log('Web Bluetooth API not found in this browser (try Chrome/Edge).', '#fca5a5');
+    }
+    if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
+      log('This page is not served over HTTPS (Web Bluetooth requires a secure origin).', '#fca5a5');
+    }
+    log(`UA: ${navigator.userAgent}`, '#94a3b8');
+    log(`Origin: ${location.origin}`, '#94a3b8');
+  })();
+
+  // ---- Connect / Disconnect with robust feedback ----
+  btnConnect.addEventListener('click', async () => {
+    log('Connect button clicked');
+    try {
+      if (!('bluetooth' in navigator)) {
+        alert('Web Bluetooth is not available in this browser. Use Chrome/Edge on desktop, or iOS Safari 16.4+.');
+        return;
+      }
+      if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
+        alert('This page is not on HTTPS (or localhost). Enable GitHub Pages HTTPS or test on localhost.');
+        return;
+      }
+      if (!connected) {
+        await connect();
+      } else {
+        await disconnect();
+      }
+    } catch (e) {
+      log('Connect click error: ' + e, '#fca5a5');
+      alert('Connect error:\n' + e);
+    }
+  });
+
   async function connect(){
     try{
-      const dev=await navigator.bluetooth.requestDevice({filters:[{services:[NUS_SERVICE]}],optionalServices:[NUS_SERVICE]});
+      log('Opening Bluetooth chooser…');
+      const dev = await navigator.bluetooth.requestDevice({
+        filters: [{ services: [NUS_SERVICE] }],
+        optionalServices: [NUS_SERVICE]
+      });
+      log(`Chooser returned: ${dev?.name || '(no name)'} (${dev?.id || 'no id'})`);
       device=dev; device.addEventListener('gattserverdisconnected', onDisconnected);
       server=await device.gatt.connect();
       const svc=await server.getPrimaryService(NUS_SERVICE);
@@ -163,18 +203,17 @@ h1{margin:0;font-size:18px}
       txChar=await svc.getCharacteristic(NUS_TX);
       await txChar.startNotifications();
       txChar.addEventListener('characteristicvaluechanged', onTxNotify);
-      uiConnected(device.name||'DiscThrower'); log(`Connected to ${device.name||'DiscThrower'}`);
-    }catch(e){log('Connect error: '+e,'#fca5a5');}
+      uiConnected(device.name||'DiscThrower');
+      log(`Connected to ${device.name||'DiscThrower'}`);
+    }catch(e){
+      log('Connect error: ' + e, '#fca5a5');
+      throw e;
+    }
   }
-  async function disconnect(){try{if(device&&device.gatt.connected)device.gatt.disconnect();}catch{} uiDisconnected();}
-  function onDisconnected(){log('Disconnected','#fca5a5'); uiDisconnected();}
+  async function disconnect(){ try{ if(device&&device.gatt.connected) device.gatt.disconnect(); }catch{} uiDisconnected(); }
+  function onDisconnected(){ log('Disconnected','#fca5a5'); uiDisconnected(); }
 
-  async function sendCmd(s){
-    if(!rxChar) return;
-    const enc=new TextEncoder(); const data=enc.encode(s+"\n");
-    for(let i=0;i<data.length;i+=200){ await rxChar.writeValueWithoutResponse(data.slice(i,i+200)); await new Promise(r=>setTimeout(r,6)); }
-  }
-
+  // ---- Notify handler / dump handling ----
   function appendDumpData(arr){ const old=dumpBuf; dumpBuf=new Uint8Array(old.length+arr.length); dumpBuf.set(old,0); dumpBuf.set(arr,old.length); }
   function finishDump(reason='bytes_complete_exact'){
     dumping=false; userAskedDump=false;
@@ -184,29 +223,28 @@ h1{margin:0;font-size:18px}
     const ts=new Date().toISOString().replace(/[:.]/g,'-');
     btnSave.download=`throw_${ts}.bin`;
     log(`Dump finished (${dumpBuf.length}/${dumpExpected}) [reason=${reason}]. Tap "Save dump".`,'#86efac');
-    // Auto-visualize
     visualizeBytes(dumpBuf).catch(e=>{vizStatus.textContent='Viz error: '+e;});
   }
   const findDl01Header=b=>{for(let i=0;i<=b.length-4;i++){if(b[i]===0x44&&b[i+1]===0x4C&&b[i+2]===0x30&&b[i+3]===0x31)return i;}return -1;}
 
   function onTxNotify(e){
-    const v = new Uint8Array(e.target.value.buffer);
-    if (dbg()) log(`[notify] len=${v.length} hex=${hexPreview(v)}`,'#94a3b8');
+    const v=new Uint8Array(e.target.value.buffer);
+    if(dbg()) log(`[notify] len=${v.length} hex=${hexPreview(v)}`,'#94a3b8');
 
-    if (dumping){
+    if(dumping){
       appendDumpData(v);
-      if (dumpBuf.length >= dumpExpected){
-        const extra = dumpBuf.length - dumpExpected;
-        if (extra>0){ const tail=dumpBuf.slice(dumpExpected); dumpBuf=dumpBuf.slice(0,dumpExpected); finishDump(); textBuf+=td.decode(tail,{stream:true}); }
+      if(dumpBuf.length>=dumpExpected){
+        const extra=dumpBuf.length-dumpExpected;
+        if(extra>0){ const tail=dumpBuf.slice(dumpExpected); dumpBuf=dumpBuf.slice(0,dumpExpected); finishDump(); textBuf+=td.decode(tail,{stream:true}); }
         else finishDump();
       }
       return;
     }
 
-    if (userAskedDump){
+    if(userAskedDump){
       const concat=new Uint8Array(hdrBuf.length+v.length); concat.set(hdrBuf,0); concat.set(v,hdrBuf.length);
       const idx=findDl01Header(concat);
-      if (idx!==-1 && concat.length>=idx+8){
+      if(idx!==-1 && concat.length>=idx+8){
         const off=idx+4;
         dumpExpected = concat[off] | (concat[off+1]<<8) | (concat[off+2]<<16) | (concat[off+3]<<24);
         dumpBuf=new Uint8Array(0); dumping=true;
@@ -233,6 +271,7 @@ h1{margin:0;font-size:18px}
           const safe=line.replace(/\bNaN\b/gi,'null').replace(/\b-?Infinity\b/gi,'null');
           const obj=JSON.parse(safe);
           if(obj && obj.type==='summary'){ applySummary(obj); log('Summary parsed & applied.','#93c5fd'); continue; }
+          if(obj && obj.type==='dump_done'){ log('Dump done message received from device.','#86efac'); continue; }
           log(line,'#cbd5e1'); continue;
         }catch(err){ log('JSON parse error: '+err,'#fca5a5'); }
       }
@@ -249,23 +288,20 @@ h1{margin:0;font-size:18px}
     pdropEl.textContent  = Number.isFinite(o.p_drop_Pa)  ? o.p_drop_Pa.toFixed(1): '—';
   }
 
-  // UI events
-  btnConnect.addEventListener('click', async()=>{ if(!connected){log('Connect button clicked'); await connect();} else {log('Disconnect button clicked'); await disconnect();}});
+  // ---- Send helpers ----
+  async function sendCmd(s){
+    if(!rxChar) return;
+    const enc=new TextEncoder(); const data=enc.encode(s+"\n");
+    for(let i=0;i<data.length;i+=200){ await rxChar.writeValueWithoutResponse(data.slice(i,i+200)); await new Promise(r=>setTimeout(r,6)); }
+  }
+
+  // ---- UI bindings ----
   btnRearm.addEventListener('click', ()=>{ log('Rearm button clicked'); sendCmd('REARM'); });
   btnSummary.addEventListener('click', ()=>{ log('Summary button clicked'); log('Sending "SUMMARY" (8B)…'); sendCmd('SUMMARY'); log('"SUMMARY" sent; awaiting response…'); });
   btnDump.addEventListener('click', ()=>{ log('Dump button clicked'); btnSave.style.display='none'; dumping=false; dumpExpected=0; dumpBuf=new Uint8Array(0); userAskedDump=true; hdrBuf=new Uint8Array(0); log('DUMP sent (waiting for DL01 header)…'); sendCmd('DUMP'); });
   btnErase.addEventListener('click', ()=>{ log('Erase button clicked'); sendCmd('ERASE'); });
 
-(function checkWebBluetoothSupport(){
-  if (!('bluetooth' in navigator)) {
-    log('Web Bluetooth API not found in this browser (try Chrome/Edge).', '#fca5a5');
-  }
-  if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
-    log('This page is not served over HTTPS (Web Bluetooth requires a secure origin).', '#fca5a5');
-  }
-  // Do NOT disable the button; we’ll show a dialog if the user clicks.
-})();
-  // ========= 3D VISUALIZATION (browser-side) =========
+  // ========= 3D VISUALIZATION =========
   const G = 9.80665;
   const fmt = (x,d=1)=>Number.isFinite(x)?x.toFixed(d):'—';
 
@@ -369,7 +405,7 @@ h1{margin:0;font-size:18px}
 
       // Altitude baseline
       const valid = rec.p.map(x=>Number.isFinite(x)&&x>1);
-      const p0 = (()=>{const vv=[];for(let i=0;i<rec.p.length;i++) if(valid[i]) vv.push(rec.p[i]); return vv.length?vv.slice(0,Math.max(5,Math.floor(vv.length/50))).reduce((a,b)=>a+b)/Math.max(1,Math.max(5,Math.floor(vv.length/50))):101325;})();
+      const p0 = (()=>{const vv=[];for(let i=0;i<rec.p.length;i++) if(valid[i]) vv.push(rec.p[i]); const n=Math.max(5,Math.floor(vv.length/50))||1; return vv.length?vv.slice(0,n).reduce((a,b)=>a+b)/n:101325;})();
       const alt = rec.p.map(x=>44330*(1.0 - Math.pow((x/100)/(p0/100), 1/5.255)));
 
       // Align so +X is forward at release
@@ -386,7 +422,7 @@ h1{margin:0;font-size:18px}
       const apex  = (Math.max(...alt) - alt[0]) || 0;
       const hang  = t[t.length-1] - t[0];
 
-      // Update summary tiles if empty
+      // Update empty summary fields
       if (samplesEl.textContent==='—') samplesEl.textContent=rec.ms.length;
       if (durEl.textContent==='—')     durEl.textContent=Math.round(hang*1000);
       if (apexEl.textContent==='—')    apexEl.textContent=fmt(apex,2);
@@ -402,7 +438,8 @@ h1{margin:0;font-size:18px}
       ];
       await Plotly.newPlot(vizDiv, data, {
         scene:{xaxis:{title:'X (m)',range:rng(xs)}, yaxis:{title:'Y (m)',range:rng(ys)}, zaxis:{title:'Z (m)',range:rng(zs)}, aspectmode:'data'},
-        margin:{l:0,r:0,t:30,b:0}, title:`Flight — release ${fmt(toKmh(releaseSp),1)} km/h · peak ${fmt(toKmh(peakSp),1)} km/h · carry ${fmt(carry,1)} m · apex ${fmt(apex,1)} m`
+        margin:{l:0,r:0,t:30,b:0},
+        title:`Flight — release ${fmt(toKmh(releaseSp),1)} km/h · peak ${fmt(toKmh(peakSp),1)} km/h · carry ${fmt(carry,1)} m · apex ${fmt(apex,1)} m`
       }, {responsive:true});
       vizStatus.textContent='Done.';
 
@@ -422,7 +459,9 @@ h1{margin:0;font-size:18px}
 
   btnViz.addEventListener('click', ()=>{ if(dumpBuf.length) visualizeBytes(dumpBuf); else vizStatus.textContent='No dump in memory yet. Press Dump first or load a .bin.'; });
   fileBin.addEventListener('change', async e=>{ const f=e.target.files?.[0]; if(!f) return; const arr=new Uint8Array(await f.arrayBuffer()); visualizeBytes(arr); });
+
 })();
 </script>
 </body>
 </html>
+
