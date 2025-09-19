@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Disc UI Test</title>
+<style>
+  body {
+    font-family: system-ui, sans-serif;
+    margin: 2rem;
+    background: #f7f8fb;
+    color: #111;
+  }
+  h1 { margin-top: 0; }
+  .status {
+    margin-top: 1rem;
+    padding: 1rem;
+    border-radius: 8px;
+    background: #fff;
+    border: 1px solid #ddd;
+  }
+</style>
+</head>
+<body>
+  <h1>GitHub Pages + Web Bluetooth Test</h1>
+
+  <p>This page is served over <b id="proto"></b>.</p>
+
+  <div class="status">
+    <p><b>Web Bluetooth supported?</b>
+      <span id="bleSupport">checking…</span>
+    </p>
+    <p>User Agent: <code id="ua"></code></p>
+  </div>
+
+  <script>
+    // Show current protocol
+    document.getElementById('proto').textContent = location.protocol;
+
+    // Show UA
+    document.getElementById('ua').textContent = navigator.userAgent;
+
+    // Check Web Bluetooth support
+    const supported = 'bluetooth' in navigator;
+    document.getElementById('bleSupport').textContent = supported ? '✅ Yes' : '❌ No';
+
+    // Optional test button to trigger device chooser if supported
+    if (supported) {
+      const btn = document.createElement('button');
+      btn.textContent = 'Test Connect';
+      btn.onclick = async () => {
+        try {
+          const dev = await navigator.bluetooth.requestDevice({acceptAllDevices:true});
+          alert('Device chosen: ' + dev.name);
+        } catch (e) {
+          alert('Cancelled or error: ' + e);
+        }
+      };
+      document.body.appendChild(btn);
+    }
+  </script>
+</body>
+</html>
