@@ -4,7 +4,7 @@
 <meta charset="utf-8"/>
 <meta http-equiv="x-ua-compatible" content="IE=edge"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
-<title>Disc Throw — BLE + 3D Viz (v1.5w)</title>
+<title>Disc Throw — BLE + 3D Viz (v1.6)</title>
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <style>
 :root{--bg:#f7f8fb;--card:#fff;--text:#111;--muted:#666;--accent:#2563eb;--ok:#16a34a;--warn:#d97706;--err:#dc2626;--border:#e5e7eb}
@@ -13,11 +13,11 @@ body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-appl
 header{padding:10px 14px;border-bottom:1px solid var(--border);background:#fff;position:sticky;top:0;z-index:2}
 h1{margin:0;font-size:18px}
 
-/* Layout: two columns on wide screens; viz spans both */
+/* Layout: left column for controls; viz spans full width on wide screens */
 .wrap{padding:12px;display:grid;gap:12px;grid-template-columns:1fr}
 @media (min-width:1000px){
-  .wrap{grid-template-columns:440px 1fr}
-  #vizCard{grid-column:1 / -1} /* FULL-WIDTH VIZ CARD */
+  .wrap{grid-template-columns:420px 1fr;}
+  #vizCard{grid-column:1 / -1;}
 }
 
 .card{background:var(--card);border:1px solid var(--border);border-radius:10px;box-shadow:0 1px 0 rgba(0,0,0,.03)}
@@ -29,25 +29,23 @@ h1{margin:0;font-size:18px}
 .btn.ok{background:var(--ok);color:#fff;border-color:var(--ok)}
 .btn.warn{background:var(--warn);color:#fff;border-color:var(--warn)}
 .btn.err{background:var(--err);color:#fff;border-color:var(--err)}
-
-.kvs{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px}
+.kvs{display:grid;grid-template-columns: repeat(auto-fit, minmax(160px,1fr)); gap:8px}
 .kv{background:#fafafa;border:1px solid var(--border);border-radius:8px;padding:8px 10px}
 .kv .k{font-size:12px;color:var(--muted)}
 .kv .v{font-size:18px;font-weight:700}
-
 .log{height:220px;overflow:auto;background:#0b1020;color:#dbeafe;border-radius:8px;padding:10px;font-size:13px;white-space:pre-wrap}
 .badge{display:inline-block;padding:3px 8px;border-radius:999px;border:1px solid var(--border);font-size:12px;color:var(--muted);background:#fff}
 .footer{padding:10px 14px;color:var(--muted);font-size:12px}
 
-/* BIGGER 3D PLOT */
-#viz{width:100%;height:clamp(560px,72vh,980px);min-height:520px}
+/* BIG Visualizer */
+#viz{width:100%;height:clamp(560px, 72vh, 1000px);min-height:520px}
 .small{font-size:12px;color:var(--muted)}
 </style>
 </head>
 <body>
 <header>
   <div class="row" style="justify-content:space-between;gap:8px">
-    <h1>Disc Throw — BLE + 3D Viz <span class="small">v1.5w</span></h1>
+    <h1>Disc Throw — BLE + 3D Viz <span class="small">v1.6</span></h1>
     <div class="row">
       <span id="devName" class="badge">disconnected</span>
       <button id="btnConnect" class="btn primary">Connect</button>
@@ -96,7 +94,7 @@ h1{margin:0;font-size:18px}
     </div>
   </section>
 
-  <!-- Visualization (FULL WIDTH on desktop) -->
+  <!-- Visualization -->
   <section class="card" id="vizCard">
     <div class="pad">
       <div class="row" style="justify-content:space-between;align-items:center">
@@ -328,6 +326,7 @@ h1{margin:0;font-size:18px}
     }
   }
 
+  // Only apex from MCU summary is used here (the rest are computed locally)
   function applySummary(o){
     apexEl.textContent = (isFinite(o.apex_m) ? Number(o.apex_m).toFixed(2) : '—');
   }
@@ -519,12 +518,13 @@ h1{margin:0;font-size:18px}
       var pView = new Array(p.length);
       for(i=0;i<p.length;i++) pView[i]=mulYaw(Q,p[i]);
 
-      // Release & peak speeds  (fixed parens + clearer)
+      // Release & peak speeds (fixed parentheses; window ~= 50 ms)
       const dtAvg = (t[t.length-1]-t[0]) / Math.max(1, t.length-1);
       const w50   = Math.max(1, Math.floor(0.05 / Math.max(0.01, dtAvg)));
-      const j0    = Math.max(0, ir - w50), j1 = Math.min(speed.length, ir + w50 + 1);
+      const j0    = Math.max(0, ir - w50);
+      const j1    = Math.min(speed.length, ir + w50 + 1);
 
-      var peakSp = -1; for(i=0;i<speed.length;i++) if(speed[i]>peakSp) peakSp=speed[i];
+      var peakSp = -1; for(i=0;i<speed.length;i++) if (speed[i]>peakSp) peakSp=speed[i];
       var releaseSp=-1; for(i=j0;i<j1;i++) if (speed[i]>releaseSp) releaseSp=speed[i];
 
       // Carry, apex (baro), hang
@@ -534,7 +534,7 @@ h1{margin:0;font-size:18px}
       var apex = (mx - alt[0]) || 0;
       var hang  = t[t.length-1] - t[0];
 
-      // Orientation @ release
+      // Orientation @ release (disc normal assumed body +Z projected to world)
       var up=[0,0,1];
       var uv = unit(v[ir]);
       var nW = [ R[ir][0][2], R[ir][1][2], R[ir][2][2] ]; // disc normal (world)
@@ -551,13 +551,13 @@ h1{margin:0;font-size:18px}
       var ang_nv = Math.acos(Math.max(-1, Math.min(1, dot(nH, uv)))) * 180/Math.PI;
       var noseDeg = 90 - ang_nv;
 
-      // Spin @ release (rpm) — body Z gyro near release
+      // Spin @ release (rpm) — use body Z gyro near release (|gz|)
       var spinDps=0, cnt=0;
       for (i=j0;i<j1;i++){ spinDps += Math.abs(g3[i][2]); cnt++; }
       spinDps = (cnt?spinDps/cnt:0);
       var spinRpm = spinDps / 6.0;
 
-      // ----- Summary cards (8) -----
+      // ----- Write cards (8 total) -----
       apexEl.textContent    = fmt(apex,2);
       relspdEl.textContent  = fmt(toKmh(releaseSp),1);
       spinrpmEl.textContent = fmt(spinRpm,0);
@@ -568,4 +568,60 @@ h1{margin:0;font-size:18px}
       noseEl.textContent    = fmt(noseDeg,1);
 
       // ----- Render -----
-      vizStatus.textContent='Rendering
+      vizStatus.textContent='Rendering…';
+      var xs=new Array(pView.length), ys=new Array(pView.length), zs=new Array(pView.length);
+      for(i=0;i<pView.length;i++){ xs[i]=pView[i][0]; ys[i]=pView[i][1]; zs[i]=pView[i][2]; }
+      function rng(a){ var lo=Infinity, hi=-Infinity, k; for(k=0;k<a.length;k++){ if(a[k]<lo) lo=a[k]; if(a[k]>hi) hi=a[k]; } return (hi>lo)?[lo,hi]:[-1,1]; }
+
+      var data = [
+        {type:'scatter3d', mode:'lines', x:xs, y:ys, z:zs, line:{width:6}, name:'This throw'},
+        {type:'scatter3d', mode:'markers', x:[xs[ir]], y:[ys[ir]], z:[zs[ir]], marker:{size:6,symbol:'diamond'}, name:'Release'},
+        {type:'scatter3d', mode:'markers', x:[xs[xs.length-1]], y:[ys[ys.length-1]], z:[zs[zs.length-1]], marker:{size:6,symbol:'x'}, name:'End'}
+      ];
+      var layout = {
+        scene:{xaxis:{title:'X (m)',range:rng(xs)}, yaxis:{title:'Y (m)',range:rng(ys)}, zaxis:{title:'Z (m)',range:rng(zs)}, aspectmode:'data'},
+        margin:{l:0,r:0,t:30,b:0},
+        title:'Flight — release '+fmt(toKmh(releaseSp),1)+' km/h · peak '+fmt(toKmh(peakSp),1)+' km/h · carry '+fmt(carry,1)+' m · apex '+fmt(apex,1)+' m'
+      };
+      Plotly.newPlot(vizDiv, data, layout, {responsive:true})
+        .then(function(){ Plotly.Plots.resize(vizDiv); vizStatus.textContent='Done.'; });
+
+      // CSV + PNG
+      var rows=["t_s,x_m,y_m,z_m,vx,vy,vz,axw,ayw,azw,alt_m"];
+      for (i=0;i<t.length;i++){
+        rows.push([t[i], pView[i][0], pView[i][1], pView[i][2],
+                   v[i][0], v[i][1], v[i][2],
+                   aWorld[i][0], aWorld[i][1], aWorld[i][2],
+                   alt[i]].join(","));
+      }
+      var csvBlob=new Blob([rows.join("\n")], {type:'text/csv'});
+      btnCSV.href=URL.createObjectURL(csvBlob);
+      btnCSV.style.display='inline-block';
+      btnPNG.onclick=function(){
+        Plotly.toImage(vizDiv,{format:'png',width:1400,height:800,scale:2})
+          .then(function(url){ btnPNG.href=url; });
+      };
+      btnPNG.style.display='inline-block';
+    }catch(e){
+      vizStatus.textContent='Viz error: '+e;
+      throw e;
+    }
+  }
+
+  btnViz.addEventListener('click', function(){
+    if (dumpBuf.length){ visualizeBytes(dumpBuf); }
+    else { vizStatus.textContent='No dump in memory yet. Press Dump first or load a .bin.'; }
+  });
+  fileBin.addEventListener('change', function(e){
+    var f = e.target.files && e.target.files[0];
+    if (!f) return;
+    f.arrayBuffer().then(function(b){ visualizeBytes(new Uint8Array(b)); });
+  });
+
+  // Ensure Plotly resizes with window
+  window.addEventListener('resize', function(){ try{ Plotly.Plots.resize(vizDiv); }catch(e){} });
+
+})();
+</script>
+</body>
+</html>
