@@ -2,95 +2,41 @@
 <html lang="en">
 <head>
 <meta charset="utf-8"/>
-<meta http-equiv="x-ua-compatible" content="IE=edge"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
-<title>Disc Throw — BLE + 3D Viz (v1.10)</title>
+<title>Disc Throw — Minimal (v1.10m)</title>
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <style>
-:root{--bg:#f7f8fb;--card:#fff;--text:#111;--muted:#666;--accent:#2563eb;--ok:#16a34a;--warn:#d97706;--err:#dc2626;--border:#e5e7eb}
-*{box-sizing:border-box} html,body{height:100%} body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
-
-/* Action bar */
-.actionbar{position:sticky;top:0;z-index:10;background:#fff;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;padding:10px 14px}
-.badge{border:1px solid var(--border);border-radius:999px;padding:4px 10px;font-size:12px;color:#475569;background:#fff}
-.split{display:inline-flex;border:1px solid var(--border);border-radius:10px;overflow:hidden}
-.split>button{border:0;background:#fff;padding:10px 14px;font-weight:600;cursor:pointer;min-width:120px}
-.split>button.primary{background:var(--accent);color:#fff}
-.split>button:disabled{opacity:.5;cursor:not-allowed}
-.menu{position:relative}
-.menu>button::after{content:"▾";margin-left:6px}
-.menu ul{display:none;position:absolute;right:0;top:calc(100% + 6px);min-width:200px;background:#fff;border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.08);padding:6px;margin:0;list-style:none;z-index:20}
-.menu ul li{margin:0}
-.menu ul button{width:100%;text-align:left;background:transparent;border:0;padding:10px 12px;cursor:pointer}
-.menu ul button.danger{color:var(--err)}
-.menu.open ul{display:block}
-.grow{flex:1}
-
-/* Layout */
+:root{--bg:#f7f8fb;--card:#fff;--text:#111;--muted:#666;--accent:#2563eb;--ok:#16a34a;--err:#dc2626;--border:#e5e7eb}
+*{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+.actionbar{position:sticky;top:0;background:#fff;border-bottom:1px solid var(--border);display:flex;gap:10px;align-items:center;padding:10px 14px;z-index:5}
+.badge{border:1px solid var(--border);border-radius:999px;padding:6px 12px;font-size:12px;color:#475569;background:#fff}
+.btn{border:1px solid var(--border);border-radius:10px;padding:10px 16px;font-weight:700;cursor:pointer;background:#fff}
+.btn.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+.btn:disabled{opacity:.55;cursor:not-allowed}
 .wrap{padding:12px;display:grid;gap:12px;grid-template-columns:1fr}
 @media (min-width:1100px){ .wrap{ grid-template-columns:420px 1fr; } }
-@media (min-width:1400px){ .wrap{ grid-template-columns:430px 1fr; } }
-
 .card{background:var(--card);border:1px solid var(--border);border-radius:10px;box-shadow:0 1px 0 rgba(0,0,0,.03)}
 .card .pad{padding:14px}
 .kvs{display:grid;grid-template-columns:repeat(2,minmax(160px,1fr));gap:8px}
 .kv{background:#fafafa;border:1px solid var(--border);border-radius:8px;padding:8px 10px}
 .kv .k{font-size:12px;color:var(--muted)}
 .kv .v{font-size:18px;font-weight:700}
-.log{height:230px;overflow:auto;background:#0b1020;color:#dbeafe;border-radius:8px;padding:10px;font-size:13px;white-space:pre-wrap}
+.log{height:240px;overflow:auto;background:#0b1020;color:#dbeafe;border-radius:8px;padding:10px;font-size:13px;white-space:pre-wrap}
 .small{font-size:12px;color:var(--muted)}
-.footer{padding:10px 14px;color:var(--muted);font-size:12px}
-
-/* Viz full width */
-#vizCard{ grid-column: 1 / -1; }
-#viz{ height:70vh; min-height:560px; width:100%; }
-
-/* Progress */
+#vizCard{grid-column:1/-1} #viz{height:70vh;min-height:560px;width:100%}
 .progress{height:8px;background:#eef2ff;border-radius:999px;overflow:hidden;border:1px solid #e5e7eb}
 .progress>div{height:100%;background:var(--accent);width:0%}
 </style>
 </head>
 <body>
-
-<!-- ===== ACTION BAR ===== -->
 <div class="actionbar">
   <span id="chip" class="badge">Disconnected</span>
-  <button id="btnPrimary" class="split-btn primary" style="border:1px solid var(--border);border-radius:10px;padding:10px 14px;font-weight:700">Connect</button>
-
-  <div class="grow"></div>
-
-  <!-- Data -->
-  <div class="split">
-    <button id="btnDumpViz" class="primary" title="Download the throw and visualize it">Dump & Visualize</button>
-    <div class="menu" id="menuData">
-      <button id="btnDataMenu" aria-haspopup="true" aria-expanded="false">More</button>
-      <ul role="menu" aria-label="Data actions">
-        <li><button id="miSummary">Summary</button></li>
-        <li><button id="miDumpOnly">Dump only</button></li>
-        <li><button id="miErase" class="danger">Erase log</button></li>
-        <li><button id="miRearm">Rearm device</button></li>
-        <li><button id="miAutosave">Auto-save: <span id="autosaveState">On</span></button></li>
-      </ul>
-    </div>
-  </div>
-
-  <!-- Viz -->
-  <div class="split">
-    <button id="btnVizLast" title="Render the last dump kept in memory">Visualize last</button>
-    <div class="menu" id="menuViz">
-      <button id="btnVizMenu" aria-haspopup="true" aria-expanded="false">More</button>
-      <ul role="menu" aria-label="Visualization">
-        <li><button id="miLoadBin">Load .bin</button></li>
-        <li><button id="miCSV">Export CSV</button></li>
-        <li><button id="miPNG">Export PNG</button></li>
-      </ul>
-    </div>
-  </div>
+  <button id="btnConnect" class="btn primary">Connect</button>
+  <div style="flex:1"></div>
+  <button id="btnDumpViz" class="btn primary">Dump & Visualize</button>
 </div>
 
 <main class="wrap">
-
-  <!-- Summary -->
   <section class="card">
     <div class="pad">
       <div style="display:flex;justify-content:space-between;align-items:center">
@@ -111,7 +57,6 @@
     </div>
   </section>
 
-  <!-- Log -->
   <section class="card">
     <div class="pad">
       <div style="display:flex;justify-content:space-between;align-items:center">
@@ -120,227 +65,161 @@
       </div>
       <div style="height:8px"></div>
       <pre id="log" class="log"></pre>
-      <div class="progress" title="Dump progress"><div id="prog"></div></div>
-      <label style="display:block;margin-top:6px"><input id="dbg" type="checkbox" checked> Debug chunks</label>
+      <div class="progress"><div id="prog"></div></div>
+      <label class="small" style="display:block;margin-top:6px"><input id="dbg" type="checkbox" checked> Debug chunks</label>
     </div>
   </section>
 
-  <!-- Visualization -->
   <section id="vizCard" class="card">
     <div class="pad">
-      <div style="display:flex;justify-content:space-between;align-items:center">
-        <h2 style="margin:0;font-size:16px">3D Visualization</h2>
-        <div class="row">
-          <input id="fileBin" type="file" class="badge" accept=".bin" title="Load .bin">
-          <a id="btnCSV" class="badge" download="throw.csv" style="display:none">CSV</a>
-          <a id="btnPNG" class="badge" download="throw.png" style="display:none">PNG</a>
-        </div>
-      </div>
-      <div class="small" id="vizStatus" style="margin-top:6px">Load a .bin or use “Dump & Visualize”.</div>
+      <h2 style="margin:0;font-size:16px">3D Visualization</h2>
+      <div class="small" id="vizStatus" style="margin-top:6px">Press “Dump & Visualize”.</div>
       <div id="viz"></div>
     </div>
   </section>
-
 </main>
-
-<div class="footer">Use <b>Chrome/Edge</b> on <b>HTTPS/localhost</b>. LED: SLOW=armed/advertising, SOLID=logging, FAST=post-BLE.</div>
 
 <script>
 (function(){
 "use strict";
 
-/* ================= BASIC STATE ================= */
+// ---------- BLE basics ----------
 const NUS_SERVICE='6e400001-b5a3-f393-e0a9-e50e24dcca9e';
 const NUS_RX='6e400002-b5a3-f393-e0a9-e50e24dcca9e';
 const NUS_TX='6e400003-b5a3-f393-e0a9-e50e24dcca9e';
 
-const logEl=document.getElementById('log');
 const chip=document.getElementById('chip');
-const btnPrimary=document.getElementById('btnPrimary');
-
+const btnConnect=document.getElementById('btnConnect');
 const btnDumpViz=document.getElementById('btnDumpViz');
-const btnDataMenu=document.getElementById('btnDataMenu');
-const btnVizLast=document.getElementById('btnVizLast');
-const btnVizMenu=document.getElementById('btnVizMenu');
-const menuData=document.getElementById('menuData');
-const menuViz=document.getElementById('menuViz');
-
-const miSummary=document.getElementById('miSummary');
-const miDumpOnly=document.getElementById('miDumpOnly');
-const miErase=document.getElementById('miErase');
-const miRearm=document.getElementById('miRearm');
-const miAutosave=document.getElementById('miAutosave');
-const autosaveStateEl=document.getElementById('autosaveState');
-
-const btnSave=document.getElementById('btnSave');
+const logEl=document.getElementById('log');
 const progBar=document.getElementById('prog');
-
-const apexEl=document.getElementById('apex');
-const carryEl=document.getElementById('carry');
-const vrelEl=document.getElementById('vrel');
-const vpeakEl=document.getElementById('vpeak');
-const spinEl=document.getElementById('spin');
-const hangEl=document.getElementById('hang');
-const hyzerEl=document.getElementById('hyzer');
-const noseEl=document.getElementById('nose');
-const summaryStatus=document.getElementById('summaryStatus');
-
-const btnCSV=document.getElementById('btnCSV');
-const btnPNG=document.getElementById('btnPNG');
-const fileBin=document.getElementById('fileBin');
+const btnSave=document.getElementById('btnSave');
 const vizStatus=document.getElementById('vizStatus');
 const vizDiv=document.getElementById('viz');
 
-let device,server,rxChar,txChar,connected=false;
-let userAskedDump=false, dumping=false, dumpExpected=0, dumpGot=0, dumpAutoViz=true;
-let dumpBuf=new Uint8Array(0), hdrBuf=new Uint8Array(0);
-const td=new TextDecoder(); let textBuf='';
-let autosave=true, useJsonFraming=false;
+const apexEl=document.getElementById('apex'), carryEl=document.getElementById('carry');
+const vrelEl=document.getElementById('vrel'), vpeakEl=document.getElementById('vpeak');
+const spinEl=document.getElementById('spin'), hangEl=document.getElementById('hang');
+const hyzerEl=document.getElementById('hyzer'), noseEl=document.getElementById('nose');
+const summaryStatus=document.getElementById('summaryStatus');
+
+let device, server, rxChar, txChar, connected=false;
+let dumping=false, userAskedDump=false, dumpExpected=0;
+let dumpBuf=new Uint8Array(0), hdrBuf=new Uint8Array(0), useJsonFraming=false;
+let textBuf='', lastSummaryMs=null;
+const td=new TextDecoder();
 
 function log(msg,color){ const d=document.createElement('div'); d.textContent=msg; if(color) d.style.color=color; logEl.appendChild(d); logEl.scrollTop=logEl.scrollHeight; }
 function dbg(){ return document.getElementById('dbg').checked; }
 function hexPreview(b,m){ m=m||16; const n=Math.min(b.length,m); let s=''; for(let i=0;i<n;i++) s+=b[i].toString(16).padStart(2,'0')+' '; return s.trim()+(b.length>n?' …':''); }
 function setProgress(x){ progBar.style.width=(Math.max(0,Math.min(1,x))*100).toFixed(1)+'%'; }
-
-/* Menus */
-function toggleMenu(el){ el.classList.toggle('open'); el.querySelector('button').setAttribute('aria-expanded', el.classList.contains('open')); }
-btnDataMenu.onclick = ()=>toggleMenu(menuData);
-btnVizMenu.onclick  = ()=>toggleMenu(menuViz);
-window.addEventListener('click', e=>{
-  document.querySelectorAll('.menu.open').forEach(m=>{ if(!m.contains(e.target)) { m.classList.remove('open'); m.querySelector('button').setAttribute('aria-expanded','false'); }});
-});
-
-/* UI STATE */
 function setState(s){
-  if (s==='disconnected'){
-    chip.textContent='Disconnected'; chip.style.color='#475569';
-    btnPrimary.textContent='Connect'; btnPrimary.onclick=doConnect; btnPrimary.disabled=false;
-  } else if (s==='armed'){
-    chip.textContent='Armed (advertising)'; chip.style.color='#16a34a';
-    btnPrimary.textContent='Disconnect'; btnPrimary.onclick=doDisconnect; btnPrimary.disabled=false;
-  } else if (s==='logging'){
-    chip.textContent='Logging…'; chip.style.color='#d97706';
-    btnPrimary.textContent='Logging…'; btnPrimary.disabled=true;
-  } else { // postble
-    chip.textContent='Ready to transfer'; chip.style.color='#16a34a';
-    btnPrimary.textContent='Rearm'; btnPrimary.onclick=()=>sendCmd('REARM'); btnPrimary.disabled=false;
-  }
+  if(s==='disconnected'){ chip.textContent='Disconnected'; chip.style.color='#475569'; btnConnect.textContent='Connect'; btnConnect.classList.add('primary'); }
+  else if(s==='armed'){ chip.textContent='Armed (advertising)'; chip.style.color='#16a34a'; btnConnect.textContent='Disconnect'; btnConnect.classList.remove('primary'); }
+  else if(s==='postble'){ chip.textContent='Ready to transfer'; chip.style.color='#16a34a'; btnConnect.textContent='Disconnect'; btnConnect.classList.remove('primary'); }
+  else if(s==='logging'){ chip.textContent='Logging…'; chip.style.color='#d97706'; }
 }
-window.setDiscUIState=setState;
+setState('disconnected');
 
-/* ================= CONNECT (with fallback) ================= */
-async function doConnect(){
+// ---------- Connect with fallback ----------
+btnConnect.onclick = async ()=>{
+  if(connected){ try{ device.gatt.disconnect(); }catch(e){} connected=false; setState('disconnected'); log('Disconnected','#fca5a5'); return; }
   log('Opening Bluetooth chooser…');
+
   try{
     let dev=null;
-
-    // 1) Try strict filter by NUS service (fast, clean list)
     try{
       dev = await navigator.bluetooth.requestDevice({
         filters:[{services:[NUS_SERVICE]}],
         optionalServices:[NUS_SERVICE]
       });
     }catch(e){
-      if (e && e.name==='NotFoundError'){
-        log('No device matched NUS filter; falling back to acceptAllDevices…','#f59e0b');
-        // 2) Fallback: accept all, still ask NUS as optional so we can access it
-        dev = await navigator.bluetooth.requestDevice({
-          acceptAllDevices:true,
-          optionalServices:[NUS_SERVICE]
-        });
-      } else { throw e; }
+      if(e.name==='NotFoundError'){
+        log('No match with service filter; falling back to acceptAllDevices','#f59e0b');
+        dev = await navigator.bluetooth.requestDevice({ acceptAllDevices:true, optionalServices:[NUS_SERVICE] });
+      } else throw e;
     }
 
-    device = dev;
-    device.addEventListener('gattserverdisconnected', onDisconnected);
-    server = await device.gatt.connect();
-    const svc = await server.getPrimaryService(NUS_SERVICE);
-    [rxChar, txChar] = await Promise.all([svc.getCharacteristic(NUS_RX), svc.getCharacteristic(NUS_TX)]);
+    device=dev; device.addEventListener('gattserverdisconnected',()=>{ connected=false; setState('disconnected'); log('Disconnected','#fca5a5'); });
+    server=await device.gatt.connect();
+    const svc=await server.getPrimaryService(NUS_SERVICE);
+    [rxChar,txChar]=await Promise.all([svc.getCharacteristic(NUS_RX), svc.getCharacteristic(NUS_TX)]);
     await txChar.startNotifications();
     txChar.addEventListener('characteristicvaluechanged', onTxNotify);
     connected=true; setState('armed');
-    log('Connected to ' + (device.name || 'DiscThrower'));
-  }catch(e){
-    log('Connect error: ' + e, '#fca5a5');
-  }
-}
-function doDisconnect(){ try{ if (device && device.gatt.connected) device.gatt.disconnect(); }catch(e){} uiDisconnected(); }
-function onDisconnected(){ uiDisconnected(); }
-function uiDisconnected(){
-  connected=false; setState('disconnected'); log('Disconnected','#fca5a5');
-  if (dumping){
-    if (dumpExpected>0 && dumpBuf.length>=dumpExpected){ finishDump('complete_before_disconnect'); }
-    dumping=false;
-  }
-}
+    log('Connected to '+(device.name||'DiscThrower'));
+  }catch(e){ log('Connect error: '+e,'#fca5a5'); }
+};
 
-/* ================= SEND CMDS ================= */
+// ---------- Dump ----------
+btnDumpViz.onclick = ()=>{
+  if(!connected){ log('Not connected. Click Connect first.','#fca5a5'); return; }
+  btnSave.style.display='none';
+  dumping=false; userAskedDump=true; useJsonFraming=false; dumpExpected=0; dumpBuf=new Uint8Array(0); hdrBuf=new Uint8Array(0); setProgress(0);
+  sendCmd('DUMP');
+};
+
 function sendCmd(s){
-  if (!rxChar) return Promise.resolve();
-  const enc=new TextEncoder(); const data=enc.encode(s+'\n'); let i=0;
-  function step(){ if(i>=data.length) return Promise.resolve();
+  if(!rxChar) return;
+  const enc=new TextEncoder(); const data=enc.encode(s+'\n');
+  let i=0; (function step(){ if(i>=data.length) return;
     const chunk=data.slice(i,i+200); i+=200;
-    return rxChar.writeValueWithoutResponse(chunk).then(()=>new Promise(r=>setTimeout(r,6))).then(step);
-  } return step();
+    rxChar.writeValueWithoutResponse(chunk).then(()=>new Promise(r=>setTimeout(r,6))).then(step);
+  })();
 }
 
-/* ================= DUMP ================= */
 function appendDumpData(arr){
   const old=dumpBuf; dumpBuf=new Uint8Array(old.length+arr.length); dumpBuf.set(old,0); dumpBuf.set(arr,old.length);
-  dumpGot=dumpBuf.length; if (dumpExpected>0) setProgress(dumpGot/dumpExpected);
+  if(dumpExpected>0) setProgress(dumpBuf.length/dumpExpected);
 }
+
 function finishDump(reason){
   dumping=false; userAskedDump=false; setProgress(1);
-
-  // Trim to DL01 payload if present
+  // Trim to DL01
   const idx=findDl01Header(dumpBuf);
-  if (idx!==-1 && dumpBuf.length>=idx+8){
+  if(idx!==-1 && dumpBuf.length>=idx+8){
     const off=idx+4, sz=dumpBuf[off]|(dumpBuf[off+1]<<8)|(dumpBuf[off+2]<<16)|(dumpBuf[off+3]<<24);
-    const need=idx+8+sz; if (dumpBuf.length>=need) dumpBuf=dumpBuf.slice(idx,need); dumpExpected=need;
+    const need=idx+8+sz; if(dumpBuf.length>=need) dumpBuf=dumpBuf.slice(idx,need); dumpExpected=need;
   }
-
   const blob=new Blob([dumpBuf],{type:'application/octet-stream'});
-  const url=URL.createObjectURL(blob);
-  btnSave.href=url; btnSave.style.display='inline-block';
+  const url=URL.createObjectURL(blob); btnSave.href=url; btnSave.style.display='inline-block';
   btnSave.download='throw_'+new Date().toISOString().replace(/[:.]/g,'-')+'.bin';
   log('Dump finished ('+dumpBuf.length+'/'+dumpExpected+') ['+reason+']','#86efac');
-
-  // After a dump, make Rearm the primary CTA
   setState('postble');
-
-  if (autosave) btnSave.click();
-  if (dumpAutoViz) visualizeBytes(dumpBuf).catch(e=>{ vizStatus.textContent='Viz error: '+e; });
+  visualizeBytes(dumpBuf).catch(e=>{ vizStatus.textContent='Viz error: '+e; });
 }
+
 function findDl01Header(b){ for(let i=0;i<=b.length-4;i++){ if(b[i]===0x44&&b[i+1]===0x4C&&b[i+2]===0x30&&b[i+3]===0x31) return i; } return -1; }
 
 function onTxNotify(e){
   const v=new Uint8Array(e.target.value.buffer);
-  if (dbg()) log('[notify] len='+v.length+' hex='+hexPreview(v),'#94a3b8');
+  if(dbg()) log('[notify] len='+v.length+' hex='+hexPreview(v),'#94a3b8');
 
-  // JSON framing path
-  if (dumping && useJsonFraming){
+  // If we're in JSON-framed mode, raw bytes are the dump body
+  if(dumping && useJsonFraming){
     appendDumpData(v);
-    if (dumpExpected>0 && dumpBuf.length>=dumpExpected){
+    if(dumpExpected>0 && dumpBuf.length>=dumpExpected){
       const extra=dumpBuf.length-dumpExpected;
-      if (extra>0){ const tail=dumpBuf.slice(dumpExpected); dumpBuf=dumpBuf.slice(0,dumpExpected); finishDump('json_exact'); textBuf+=td.decode(tail,{stream:true}); }
-      else { finishDump('json_exact'); }
+      if(extra>0){ const tail=dumpBuf.slice(dumpExpected); dumpBuf=dumpBuf.slice(0,dumpExpected); finishDump('json_exact'); textBuf+=td.decode(tail,{stream:true}); }
+      else finishDump('json_exact');
     }
     return;
   }
 
-  // Legacy DL01 fallback while waiting for first header
-  if (userAskedDump && !useJsonFraming){
+  // Legacy DL01 auto-detect while waiting for header
+  if(userAskedDump && !useJsonFraming){
     const concat=new Uint8Array(hdrBuf.length+v.length); concat.set(hdrBuf,0); concat.set(v,hdrBuf.length);
     const idx=findDl01Header(concat);
-    if (idx!==-1 && concat.length>=idx+8){
+    if(idx!==-1 && concat.length>=idx+8){
       const off=idx+4; const body=concat[off]|(concat[off+1]<<8)|(concat[off+2]<<16)|(concat[off+3]<<24);
-      dumpExpected=8+body; dumpBuf=concat.slice(idx); dumping=true; userAskedDump=false; log('DL01 header detected. Expecting '+dumpExpected+' bytes','#fde68a');
-      hdrBuf=new Uint8Array(0); if (dumpBuf.length>=dumpExpected) finishDump('dl01_exact'); return;
+      dumpExpected=8+body; dumpBuf=concat.slice(idx); dumping=true; userAskedDump=false; hdrBuf=new Uint8Array(0); log('DL01 header detected. Expecting '+dumpExpected+' bytes','#fde68a');
+      if(dumpBuf.length>=dumpExpected) finishDump('dl01_exact');
+      return;
     }
-    hdrBuf=concat.slice(Math.max(0,concat.length-7)); // rolling window
+    hdrBuf=concat.slice(Math.max(0,concat.length-7));
   }
 
-  // Text / JSON
+  // Otherwise treat as JSON lines
   textBuf+=td.decode(v,{stream:true});
   processTextBuf();
 }
@@ -350,169 +229,200 @@ function processTextBuf(){
   while((pos=textBuf.indexOf('\n'))!==-1){
     const raw=textBuf.slice(0,pos); textBuf=textBuf.slice(pos+1);
     const line=raw.trim(); if(!line) continue;
-
     if(line[0]==='{' && line[line.length-1]==='}'){
       try{
         const obj=JSON.parse(line.replace(/\bNaN\b/gi,'null').replace(/\b-?Infinity\b/gi,'null'));
-
-        if (obj.type==='dump_begin' && typeof obj.bytes==='number'){
-          dumping=true; dumpExpected=obj.bytes; dumpGot=0; dumpBuf=new Uint8Array(0);
-          useJsonFraming=true; userAskedDump=false; hdrBuf=new Uint8Array(0); setProgress(0);
-          log('dump_begin: expecting '+dumpExpected+' bytes','#fde68a'); continue;
-        }
-        if (obj.type==='dump_done'){ log('dump_done from device.','#86efac'); continue; }
-
-        if (obj.type==='summary'){
-          const fmt=(x,d)=> (x==null||!isFinite(x))?'—':Number(x).toFixed(d);
-          summaryStatus.textContent='Samples '+obj.samples+' · duration '+obj.duration_ms+' ms';
-          apexEl.textContent=fmt(obj.apex_m,2);
-          continue;
-        }
-
-        log(line,'#cbd5e1'); continue;
+        if(obj.type==='dump_begin' && typeof obj.bytes==='number'){ dumping=true; useJsonFraming=true; dumpExpected=obj.bytes; setProgress(0); log('dump_begin '+dumpExpected+' bytes','#fde68a'); continue; }
+        if(obj.type==='dump_done'){ log('dump_done','#86efac'); continue; }
+        if(obj.type==='summary'){ lastSummaryMs = Number(obj.duration_ms)||null; summaryStatus.textContent='Samples '+obj.samples+' · duration '+obj.duration_ms+' ms'; if(isFinite(obj.apex_m)) apexEl.textContent=Number(obj.apex_m).toFixed(2); continue; }
+        log(line,'#cbd5e1');
       }catch(err){ log('JSON parse error: '+err,'#fca5a5'); }
-    } else {
-      log(line);
-    }
+    } else log(line);
   }
 }
 
-/* Buttons */
-btnPrimary.onclick=doConnect;
-btnDumpViz.onclick=()=>{ dumpAutoViz=true; startDump(); };
-miDumpOnly.onclick=()=>{ dumpAutoViz=false; startDump(); };
-miSummary.onclick =()=> sendCmd('SUMMARY');
-miErase.onclick   =()=> sendCmd('ERASE');
-miRearm.onclick   =()=> sendCmd('REARM');
+// ---------- Viz (with guards against bad data) ----------
+const G=9.80665;
+function fmt(x,d){ return isFinite(x)?Number(x).toFixed(d):'—'; }
 
-btnVizLast.onclick =()=>{ if(dumpBuf.length){ visualizeBytes(dumpBuf); } else { vizStatus.textContent='No dump in memory yet.'; } };
-
-miAutosave.onclick =()=>{ autosave=!autosave; autosaveStateEl.textContent=autosave?'On':'Off'; };
-
-function startDump(){
-  if (!connected){ log('Not connected. Click Connect first.','#fca5a5'); return; }
-  btnSave.style.display='none';
-  dumping=false; useJsonFraming=false; dumpExpected=0; dumpGot=0; setProgress(0);
-  dumpBuf=new Uint8Array(0); userAskedDump=true; hdrBuf=new Uint8Array(0);
-  sendCmd('DUMP');
+function stripHeaderIfAny(bytes){
+  if(bytes.length>=8 && bytes[0]===0x44 && bytes[1]===0x4c && bytes[2]===0x30 && bytes[3]===0x31){
+    const sz=bytes[4]|(bytes[5]<<8)|(bytes[6]<<16)|(bytes[7]<<24);
+    return bytes.slice(8,8+sz);
+  }
+  return bytes;
+}
+function parseRecords(buf){
+  const rec=4+2*6+4, n=Math.floor(buf.length/rec);
+  const ms=new Uint32Array(n);
+  const ax=new Float64Array(n), ay=new Float64Array(n), az=new Float64Array(n);
+  const gx=new Float64Array(n), gy=new Float64Array(n), gz=new Float64Array(n);
+  const p =new Float64Array(n);
+  const dv=new DataView(buf.buffer, buf.byteOffset, n*rec);
+  let o=0;
+  for(let i=0;i<n;i++){
+    ms[i]=dv.getUint32(o,true); o+=4;
+    ax[i]=dv.getInt16(o,true)/100; o+=2; ay[i]=dv.getInt16(o,true)/100; o+=2; az[i]=dv.getInt16(o,true)/100; o+=2;
+    gx[i]=dv.getInt16(o,true)/10;  o+=2; gy[i]=dv.getInt16(o,true)/10;  o+=2; gz[i]=dv.getInt16(o,true)/10;  o+=2;
+    p[i]=dv.getFloat32(o,true); o+=4;
+  }
+  return {ms,ax,ay,az,gx,gy,gz,p};
 }
 
-/* File loader */
-fileBin.addEventListener('change', e=>{
-  const f=e.target.files && e.target.files[0]; if(!f) return;
-  f.arrayBuffer().then(b=> visualizeBytes(new Uint8Array(b)));
-});
+// U32 time → seconds, handle wrap & clamp weird jumps
+function normalizeTime(msU32){
+  const MAX=0x100000000>>>0;
+  const n=msU32.length; const t=new Array(n);
+  let base=msU32[0]>>>0, prev=base>>>0, off=0;
+  for(let i=0;i<n;i++){
+    const cur=msU32[i]>>>0;
+    if(cur<prev) off+=MAX;
+    t[i]=(cur+off-base)/1000;
+    prev=cur;
+  }
+  for(let i=1;i<n;i++){ const dt=t[i]-t[i-1]; if(dt<0.001||dt>0.1){ t[i]=t[i-1]+Math.max(0.001, Math.min(0.05, dt)); } }
+  return t;
+}
 
-/* ================= Visualization (same as your previous build) ================= */
-var G=9.80665; function fmt(x,d){ return isFinite(x)?Number(x).toFixed(d):'—'; }
-function stripHeaderIfAny(bytes){ if(bytes.length>=8&&bytes[0]===0x44&&bytes[1]===0x4c&&bytes[2]===0x30&&bytes[3]===0x31){ var sz=bytes[4]|(bytes[5]<<8)|(bytes[6]<<16)|(bytes[7]<<24); return bytes.slice(8,8+sz);} return bytes; }
-function parseRecords(buf){ var rec=4+2*6+4,n=Math.floor(buf.length/rec); var ms=new Uint32Array(n); var ax=new Float64Array(n),ay=new Float64Array(n),az=new Float64Array(n); var gx=new Float64Array(n),gy=new Float64Array(n),gz=new Float64Array(n); var p=new Float64Array(n); var dv=new DataView(buf.buffer,buf.byteOffset,n*rec); var o=0; for(var i=0;i<n;i++){ ms[i]=dv.getUint32(o,true);o+=4; ax[i]=dv.getInt16(o,true)/100;o+=2; ay[i]=dv.getInt16(o,true)/100;o+=2; az[i]=dv.getInt16(o,true)/100;o+=2; gx[i]=dv.getInt16(o,true)/10;o+=2; gy[i]=dv.getInt16(o,true)/10;o+=2; gz[i]=dv.getInt16(o,true)/10;o+=2; p[i]=dv.getFloat32(o,true);o+=4;} return {ms:ms,ax:ax,ay:ay,az:az,gx:gx,gy:gy,gz:gz,p:p}; }
-function complementaryRPY(ax,ay,az,gx,gy,gz,dt,tau){ var n=dt.length,roll=new Float64Array(n),pitch=new Float64Array(n),yaw=new Float64Array(n); var gxr=new Float64Array(n),gyr=new Float64Array(n),gzr=new Float64Array(n); for(var i=0;i<n;i++){ gxr[i]=gx[i]*Math.PI/180; gyr[i]=gy[i]*Math.PI/180; gzr[i]=gz[i]*Math.PI/180; } roll[0]=Math.atan2(ay[0],az[0]); pitch[0]=Math.atan2(-ax[0],Math.hypot(ay[0],az[0])); for(i=1;i<n;i++){ var a=tau/(tau+dt[i]); var roll_g=roll[i-1]+gxr[i]*dt[i]; var pitch_g=pitch[i-1]+gyr[i]*dt[i]; yaw[i]=yaw[i-1]+gzr[i]*dt[i]; var roll_a=Math.atan2(ay[i],az[i]); var pitch_a=Math.atan2(-ax[i],Math.hypot(ay[i],az[i])); roll[i]=a*roll_g+(1-a)*roll_a; pitch[i]=a*pitch_g+(1-a)*pitch_a; } return {roll:roll,pitch:pitch,yaw:yaw}; }
-function rotationMats(roll,pitch,yaw){ var n=roll.length,R=new Array(n); for(var i=0;i<n;i++){ var cr=Math.cos(roll[i]),sr=Math.sin(roll[i]); var cp=Math.cos(pitch[i]),sp=Math.sin(pitch[i]); var cy=Math.cos(yaw[i]),sy=Math.sin(yaw[i]); R[i]=[[cy*cp,cy*sp*sr - sy*cr,cy*sp*cr + sy*sr],[sy*cp,sy*sp*sr + cy*cr,sy*sp*cr - cy*sr],[-sp,cp*sr,cp*cr]];} return R; }
-function mulMV(M,v){ return [M[0][0]*v[0]+M[0][1]*v[1]+M[0][2]*v[2], M[1][0]*v[0]+M[1][1]*v[1]+M[1][2]*v[2], M[2][0]*v[0]+M[2][1]*v[1]+M[2][2]*v[2]]; }
-function detectMotion(a_ms2,g_dps){ var n=a_ms2.length,mask=new Array(n); for(var i=0;i<n;i++){ var aN=Math.hypot(a_ms2[i][0],a_ms2[i][1],a_ms2[i][2])/G; var gN=Math.hypot(g_dps[i][0],g_dps[i][1],g_dps[i][2]); mask[i]=(gN>50)||Math.abs(aN-1)>0.15; } var out=new Array(n); for(i=0;i<n;i++){ var s=0; for(var j=-4;j<=4;j++){ var x=i+j; if(x>=0&&x<n) s+=(mask[x]?1:0);} out[i]=s>4;} return out; }
-function integrateWithEndZero(a,t,move){ var n=t.length,v=new Array(n),p=new Array(n); for(var i=0;i<n;i++){ v[i]=[0,0,0]; p[i]=[0,0,0]; } var dt=new Array(n); dt[0]=0; for(i=1;i<n;i++) dt[i]=Math.max(0.001,Math.min(0.05,t[i]-t[i-1])); for(i=1;i<n;i++){ for(var j=0;j<3;j++){ v[i][j]=v[i-1][j]+a[i][j]*dt[i]; } } var any=false; for(i=0;i<move.length;i++){ if(move[i]){ any=true; break; } } if(any){ var i0=move.indexOf(true); var i1=move.length-1 - move.slice().reverse().indexOf(true); var T=Math.max(t[i1]-t[i0],1e-6); var drift=[v[i1][0]/T,v[i1][1]/T,v[i1][2]/T]; for(i=i0;i<=i1;i++){ var s=t[i]-t[i0]; for(var j=0;j<3;j++){ v[i][j]-=s*drift[j]; } } for(i=1;i<n;i++){ for(var j=0;j<3;j++){ p[i][j]=p[i-1][j]+v[i][j]*dt[i]; } } var o=[p[i0][0],p[i0][1],p[i0][2]]; for(i=0;i<n;i++){ for(var j=0;j<3;j++){ p[i][j]-=o[j]; } } } return {v:v,p:p}; }
-function pickReleaseIndex(t,speed){ var n=t.length,s=new Array(n); var dtAvg=(t[n-1]-t[0])/Math.max(1,n-1); if(!isFinite(dtAvg)||dtAvg<=0) dtAvg=0.01; var w=Math.max(1,Math.round(0.05/dtAvg)); for(var i=0;i<n;i++){ var sum=0,c=0; for(var j=-w;j<=w;j++){ var k=i+j; if(k>=0&&k<n){ sum+=speed[k]; c++; } } s[i]=sum/Math.max(1,c); } var endT=t[0]+Math.min(0.30,t[t.length-1]-t[0]); var endI=n-1; for(var ii=0;ii<n;ii++){ if(t[ii]>=endT){ endI=ii; break; } } var mx=-1,mi=0; for(var i2=0;i2<=endI;i2++){ if(s[i2]>mx){ mx=s[i2]; mi=i2; } } return mi; }
-function yawMatrix(deg){ var r=deg*Math.PI/180,c=Math.cos(r),s=Math.sin(r); return [[c,-s,0],[s,c,0],[0,0,1]]; }
-function mulYaw(M,v){ return [M[0][0]*v[0]+M[0][1]*v[1], M[1][0]*v[0]+M[1][1]*v[1], v[2]]; }
+function complementaryRPY(ax,ay,az,gx,gy,gz,dt,tau){
+  const n=dt.length, roll=new Float64Array(n), pitch=new Float64Array(n), yaw=new Float64Array(n);
+  const gxr=new Float64Array(n), gyr=new Float64Array(n), gzr=new Float64Array(n);
+  for(let i=0;i<n;i++){ gxr[i]=gx[i]*Math.PI/180; gyr[i]=gy[i]*Math.PI/180; gzr[i]=gz[i]*Math.PI/180; }
+  roll[0]=Math.atan2(ay[0],az[0]); pitch[0]=Math.atan2(-ax[0], Math.hypot(ay[0],az[0]));
+  for(let i=1;i<n;i++){
+    const a=tau/(tau+dt[i]);
+    const roll_g=roll[i-1]+gxr[i]*dt[i], pitch_g=pitch[i-1]+gyr[i]*dt[i];
+    yaw[i]=yaw[i-1]+gzr[i]*dt[i];
+    const roll_a=Math.atan2(ay[i],az[i]); const pitch_a=Math.atan2(-ax[i], Math.hypot(ay[i],az[i]));
+    roll[i]=a*roll_g+(1-a)*roll_a; pitch[i]=a*pitch_g+(1-a)*pitch_a;
+  }
+  return {roll,pitch,yaw};
+}
+function rotationMats(roll,pitch,yaw){
+  const n=roll.length, R=new Array(n);
+  for(let i=0;i<n;i++){
+    const cr=Math.cos(roll[i]), sr=Math.sin(roll[i]);
+    const cp=Math.cos(pitch[i]), sp=Math.sin(pitch[i]);
+    const cy=Math.cos(yaw[i]), sy=Math.sin(yaw[i]);
+    R[i]=[[cy*cp,cy*sp*sr - sy*cr,cy*sp*cr + sy*sr],[sy*cp,sy*sp*sr + cy*cr,sy*sp*cr - cy*sr],[-sp,cp*sr,cp*cr]];
+  }
+  return R;
+}
+function mulMV(M,v){ return [ M[0][0]*v[0]+M[0][1]*v[1]+M[0][2]*v[2], M[1][0]*v[0]+M[1][1]*v[1]+M[1][2]*v[2], M[2][0]*v[0]+M[2][1]*v[1]+M[2][2]*v[2] ]; }
+function detectMotion(a_ms2,g_dps){
+  const n=a_ms2.length, mask=new Array(n);
+  for(let i=0;i<n;i++){
+    const aN=Math.hypot(a_ms2[i][0],a_ms2[i][1],a_ms2[i][2])/9.80665;
+    const gN=Math.hypot(g_dps[i][0],g_dps[i][1],g_dps[i][2]);
+    mask[i]=(gN>50)||Math.abs(aN-1)>0.15;
+  }
+  const out=new Array(n);
+  for(let i=0;i<n;i++){ let s=0; for(let j=-4;j<=4;j++){ const x=i+j; if(x>=0&&x<n) s+=mask[x]?1:0; } out[i]=s>4; }
+  return out;
+}
+function integrateWithEndZero(a,t,move){
+  const n=t.length, v=new Array(n), p=new Array(n);
+  for(let i=0;i<n;i++){ v[i]=[0,0,0]; p[i]=[0,0,0]; }
+  const dt=new Array(n); dt[0]=0; for(let i=1;i<n;i++) dt[i]=Math.max(0.001,Math.min(0.05,t[i]-t[i-1]));
+  for(let i=1;i<n;i++){ for(let j=0;j<3;j++) v[i][j]=v[i-1][j]+a[i][j]*dt[i]; }
+  let any=false; for(let i=0;i<move.length;i++) if(move[i]){ any=true; break; }
+  if(any){
+    const i0=move.indexOf(true); const i1=move.length-1 - move.slice().reverse().indexOf(true);
+    const T=Math.max(t[i1]-t[i0],1e-6); const drift=[ v[i1][0]/T, v[i1][1]/T, v[i1][2]/T ];
+    for(let i=i0;i<=i1;i++){ const s=t[i]-t[i0]; for(let j=0;j<3;j++) v[i][j]-=s*drift[j]; }
+    for(let i=1;i<n;i++){ for(let j=0;j<3;j++) p[i][j]=p[i-1][j]+v[i][j]*dt[i]; }
+    const o=[p[i0][0],p[i0][1],p[i0][2]]; for(let i=0;i<n;i++){ for(let j=0;j<3;j++) p[i][j]-=o[j]; }
+  }
+  return {v,p};
+}
+function yawMatrix(deg){ const r=deg*Math.PI/180,c=Math.cos(r),s=Math.sin(r); return [[c,-s,0],[s,c,0],[0,0,1]]; }
+function mulYaw(M,v){ return [ M[0][0]*v[0]+M[0][1]*v[1], M[1][0]*v[0]+M[1][1]*v[1], v[2] ]; }
 
 function visualizeBytes(rawBytes){
   vizStatus.textContent='Parsing…';
-  try{
-    var payload=stripHeaderIfAny(new Uint8Array(rawBytes));
-    var rec=parseRecords(payload);
-    if(!rec.ms.length){ vizStatus.textContent='No samples.'; return; }
+  const payload=stripHeaderIfAny(new Uint8Array(rawBytes));
+  const rec=parseRecords(payload);
+  if(!rec.ms.length){ vizStatus.textContent='No samples.'; return; }
 
-    var t=new Array(rec.ms.length); for(var i=0;i<t.length;i++) t[i]=rec.ms[i]/1000;
-    var dt=new Array(t.length); dt[0]=0; for(i=1;i<t.length;i++) dt[i]=Math.max(0.001,Math.min(0.05,t[i]-t[i-1]));
+  const t = normalizeTime(rec.ms);
+  const dt=new Array(t.length); dt[0]=0; for(let i=1;i<t.length;i++) dt[i]=Math.max(0.001,Math.min(0.05,t[i]-t[i-1]));
 
-    var rpy=complementaryRPY(rec.ax,rec.ay,rec.az,rec.gx,rec.gy,rec.gz,dt,0.5);
-    var R=rotationMats(rpy.roll,rpy.pitch,rpy.yaw);
+  const rpy=complementaryRPY(rec.ax,rec.ay,rec.az,rec.gx,rec.gy,rec.gz,dt,0.5);
+  const R=rotationMats(rpy.roll,rpy.pitch,rpy.yaw);
 
-    var aBody=new Array(rec.ax.length); for(i=0;i<aBody.length;i++) aBody[i]=[rec.ax[i],rec.ay[i],rec.az[i]];
-    var aWorld=new Array(aBody.length); for(i=0;i<aWorld.length;i++) aWorld[i]=mulMV(R[i],aBody[i]);
-    var aLin=new Array(aWorld.length); for(i=0;i<aLin.length;i++) aLin[i]=[aWorld[i][0],aWorld[i][1],aWorld[i][2]-G];
+  const aBody=new Array(rec.ax.length); for(let i=0;i<aBody.length;i++) aBody[i]=[rec.ax[i],rec.ay[i],rec.az[i]];
+  const aWorld=new Array(aBody.length); for(let i=0;i<aWorld.length;i++) aWorld[i]=mulMV(R[i],aBody[i]);
+  const aLin=new Array(aWorld.length); for(let i=0;i<aLin.length;i++) aLin[i]=[aWorld[i][0],aWorld[i][1],aWorld[i][2]-9.80665];
 
-    var g3=new Array(rec.gx.length); for(i=0;i<g3.length;i++) g3[i]=[rec.gx[i],rec.gy[i],rec.gz[i]];
-    var move=detectMotion(aBody,g3);
-    var ip=integrateWithEndZero(aLin,t,move);
-    var v=ip.v,p=ip.p;
+  const g3=new Array(rec.gx.length); for(let i=0;i<g3.length;i++) g3[i]=[rec.gx[i],rec.gy[i],rec.gz[i]];
+  const move=detectMotion(aBody,g3);
+  const ip=integrateWithEndZero(aLin,t,move); const v=ip.v, p=ip.p;
 
-    var speed=new Array(v.length); for(i=0;i<speed.length;i++) speed[i]=Math.hypot(v[i][0],v[i][1],v[i][2])+1e-12;
-    var ir=pickReleaseIndex(t,speed);
+  const speed=new Array(v.length); for(let i=0;i<speed.length;i++) speed[i]=Math.hypot(v[i][0],v[i][1],v[i][2])+1e-12;
+  const ir = (function pickReleaseIndex(){
+    // smoothed early-window max
+    const n=t.length; const s=new Array(n);
+    const dtAvg=(t[n-1]-t[0])/Math.max(1,n-1)||0.01; const w=Math.max(1,Math.round(0.05/dtAvg));
+    for(let i=0;i<n;i++){ let sum=0,c=0; for(let j=-w;j<=w;j++){ const k=i+j; if(k>=0&&k<n){ sum+=speed[k]; c++; } } s[i]=sum/Math.max(1,c); }
+    const endT=t[0]+Math.min(0.30,t[t.length-1]-t[0]); let endI=n-1; for(let i=0;i<n;i++) if(t[i]>=endT){ endI=i; break; }
+    let mx=-1, mi=0; for(let i=0;i<=endI;i++) if(s[i]>mx){ mx=s[i]; mi=i; } return mi;
+  })();
 
-    var valid=new Array(rec.p.length); for(i=0;i<valid.length;i++) valid[i]=isFinite(rec.p[i])&&rec.p[i]>1;
-    var p0=(function(){ var vv=[],j; for(j=0;j<rec.p.length;j++) if(valid[j]) vv.push(rec.p[j]); var n=Math.max(5,Math.floor(vv.length/50))||1; if(!vv.length) return 101325; var sum=0; for(j=0;j<Math.min(n,vv.length);j++) sum+=vv[j]; return sum/Math.min(n,vv.length); })();
-    var alt=new Array(rec.p.length); for(i=0;i<alt.length;i++) alt[i]=44330*(1.0 - Math.pow((rec.p[i]/100)/(p0/100), 1/5.255));
+  // Pressure → altitude with guards (ignore zeros/bad)
+  function altFromPa(pPa,p0Pa){
+    if(!isFinite(pPa) || pPa<50000 || pPa>110000) return NaN;
+    return 44330*(1.0 - Math.pow((pPa/100)/(p0Pa/100), 1/5.255));
+  }
+  // p0 = median of first second of valid samples
+  const validIdx=[]; for(let i=0;i<rec.p.length;i++){ if(isFinite(rec.p[i]) && rec.p[i]>50000 && rec.p[i]<110000) validIdx.push(i); }
+  let p0Pa=101325; if(validIdx.length){ const firstSecond = validIdx.filter(i=>t[i]-t[0]<1.0).map(i=>rec.p[i]); firstSecond.sort((a,b)=>a-b); p0Pa = firstSecond[Math.floor(firstSecond.length/2)] || firstSecond[0] || 101325; }
+  const alt=new Array(rec.p.length); for(let i=0;i<alt.length;i++) alt[i]=altFromPa(rec.p[i],p0Pa);
 
-    var theta=Math.atan2(v[ir][1],v[ir][0])*180/Math.PI; var Q=yawMatrix(-theta);
-    var pView=new Array(p.length); for(i=0;i<p.length;i++) pView[i]=mulYaw(Q,p[i]);
+  // Reorient yaw by release heading
+  const theta=Math.atan2(v[ir][1],v[ir][0])*180/Math.PI; const Q=yawMatrix(-theta);
+  const pView=new Array(p.length); for(let i=0;i<p.length;i++) pView[i]=mulYaw(Q,p[i]);
 
-    function toKmh(s){ return s*3.6; }
-    var peakSp=-1; for(i=0;i<speed.length;i++) if(speed[i]>peakSp) peakSp=speed[i];
-    var dtAvg=(t[t.length-1]-t[0])/Math.max(1,t.length-1); if(!isFinite(dtAvg)||dtAvg<=0) dtAvg=0.01;
-    var w=Math.max(1,Math.round(0.05/dtAvg)); var j0=Math.max(0,ir-w), j1=Math.min(speed.length-1,ir+w);
-    var releaseSp=0; for(i=j0;i<=j1;i++) releaseSp+=speed[i]; releaseSp/=Math.max(1,(j1-j0+1));
-    var gmag=0; for(i=j0;i<=j1;i++){ gmag+=Math.hypot(rec.gx[i],rec.gy[i],rec.gz[i]); } gmag/=Math.max(1,(j1-j0+1));
-    var spinRpm=gmag/6, hyzerDeg=-rpy.roll[ir]*180/Math.PI, noseDeg=rpy.pitch[ir]*180/Math.PI;
-    var dx=p[p.length-1][0]-p[0][0], dy=p[p.length-1][1]-p[0][1]; var carry=Math.hypot(dx,dy);
-    var mx=-1; for(i=0;i<alt.length;i++) if(alt[i]>mx) mx=alt[i]; var apex=(mx-alt[0])||0; var hang=t[t.length-1]-t[0];
+  // KPIs (clamped)
+  function toKmh(s){ return s*3.6; }
+  let peakSp=0; for(let i=0;i<speed.length;i++) if(speed[i]>peakSp) peakSp=speed[i];
+  const dtAvg=(t[t.length-1]-t[0])/Math.max(1,t.length-1)||0.01; const w=Math.max(1,Math.round(0.05/dtAvg));
+  const j0=Math.max(0,ir-w), j1=Math.min(speed.length-1, ir+w);
+  let releaseSp=0; for(let i=j0;i<=j1;i++) releaseSp+=speed[i]; releaseSp/=Math.max(1,(j1-j0+1));
+  let gmag=0; for(let i=j0;i<=j1;i++) gmag+=Math.hypot(rec.gx[i],rec.gy[i],rec.gz[i]); gmag/=Math.max(1,(j1-j0+1));
+  const spinRpm=gmag/6;
+  const hyzerDeg=-rpy.roll[ir]*180/Math.PI, noseDeg=rpy.pitch[ir]*180/Math.PI;
+  const dx=p[p.length-1][0]-p[0][0], dy=p[p.length-1][1]-p[0][1];
+  let carry=Math.hypot(dx,dy); if(!isFinite(carry) || carry>500) carry=NaN;
 
-    apexEl.textContent=fmt(apex,2); carryEl.textContent=fmt(carry,1);
-    vrelEl.textContent=fmt(toKmh(releaseSp),1); vpeakEl.textContent=fmt(toKmh(peakSp),1);
-    spinEl.textContent=fmt(spinRpm,0); hangEl.textContent=fmt(hang,2);
-    hyzerEl.textContent=fmt(hyzerDeg,1); noseEl.textContent=fmt(noseDeg,1);
+  let mx=-Infinity; for(let i=0;i<alt.length;i++) if(isFinite(alt[i]) && alt[i]>mx) mx=alt[i];
+  let apx=isFinite(mx)&&isFinite(alt[0]) ? mx-alt[0] : NaN; if(apx>100) apx=NaN;
 
-    vizStatus.textContent='Rendering…';
-    var xs=new Array(pView.length),ys=new Array(pView.length),zs=new Array(pView.length);
-    for(i=0;i<pView.length;i++){ xs[i]=pView[i][0]; ys[i]=pView[i][1]; zs[i]=pView[i][2]; }
-    function rng(a){ var lo=Infinity, hi=-Infinity, k; for(k=0;k<a.length;k++){ if(a[k]<lo) lo=a[k]; if(a[k]>hi) hi=a[k]; } return (hi>lo)?[lo,hi]:[-1,1]; }
+  let hang=t[t.length-1]-t[0];
+  if(lastSummaryMs) hang=Math.min(hang, lastSummaryMs/1000 + 0.2);
+  if(hang<0 || hang>60) hang=NaN;
 
-    Plotly.newPlot(vizDiv,[
-      {type:'scatter3d',mode:'lines',x:xs,y:ys,z:zs,line:{width:6},name:'This throw'},
-      {type:'scatter3d',mode:'markers',x:[xs[ir]],y:[ys[ir]],z:[zs[ir]],marker:{size:6,symbol:'diamond'},name:'Release'},
-      {type:'scatter3d',mode:'markers',x:[xs[xs.length-1]],y:[ys[ys.length-1]],z:[zs[zs.length-1]],marker:{size:6,symbol:'x'},name:'End'}
-    ],{
-      scene:{xaxis:{title:'X (m)',range:rng(xs)},yaxis:{title:'Y (m)',range:rng(ys)},zaxis:{title:'Z (m)',range:rng(zs)},aspectmode:'data'},
+  apexEl.textContent=fmt(apx,2);
+  carryEl.textContent=fmt(carry,1);
+  vrelEl.textContent=fmt(toKmh(releaseSp),1);
+  vpeakEl.textContent=fmt(toKmh(peakSp),1);
+  spinEl.textContent=fmt(spinRpm,0);
+  hangEl.textContent=fmt(hang,2);
+  hyzerEl.textContent=fmt(hyzerDeg,1);
+  noseEl.textContent=fmt(noseDeg,1);
+
+  vizStatus.textContent='Rendering…';
+  const xs=pView.map(v=>v[0]), ys=pView.map(v=>v[1]), zs=pView.map(v=>v[2]);
+  function rng(a){ let lo=Infinity, hi=-Infinity; for(const x of a){ if(x<lo) lo=x; if(x>hi) hi=x; } return isFinite(lo)&&isFinite(hi)&&hi>lo?[lo,hi]:[-1,1]; }
+
+  Plotly.newPlot(vizDiv,[
+    {type:'scatter3d',mode:'lines',x:xs,y:ys,z:zs,line:{width:6},name:'This throw'},
+    {type:'scatter3d',mode:'markers',x:[xs[ir]],y:[ys[ir]],z:[zs[ir]],marker:{size:6,symbol:'diamond'},name:'Release'},
+    {type:'scatter3d',mode:'markers',x:[xs[xs.length-1]],y:[ys[ys.length-1]],z:[zs[zs.length-1]],marker:{size:6,symbol:'x'},name:'End'}
+  ],{scene:{xaxis:{title:'X (m)',range:rng(xs)},yaxis:{title:'Y (m)',range:rng(ys)},zaxis:{title:'Z (m)',range:rng(zs)},aspectmode:'data'},
       margin:{l:0,r:0,t:30,b:0},
-      title:'Flight — release '+fmt(toKmh(releaseSp),1)+' km/h · peak '+fmt(toKmh(peakSp),1)+' km/h · carry '+fmt(carry,1)+' m · apex '+fmt(apex,1)+' m'
-    },{responsive:true}).then(()=>{ vizStatus.textContent='Done.'; });
-
-    var rows=["t_s,x_m,y_m,z_m,vx,vy,vz,axw,ayw,azw,alt_m,roll_deg,pitch_deg,yaw_deg"];
-    for(i=0;i<t.length;i++){
-      rows.push([t[i],pView[i][0],pView[i][1],pView[i][2],v[i][0],v[i][1],v[i][2],aWorld[i][0],aWorld[i][1],aWorld[i][2],alt[i],rpy.roll[i]*180/Math.PI,rpy.pitch[i]*180/Math.PI,rpy.yaw[i]*180/Math.PI].join(","));
-    }
-    var csvBlob=new Blob([rows.join("\n")],{type:'text/csv'});
-    btnCSV.href=URL.createObjectURL(csvBlob); btnCSV.style.display='inline-block';
-    btnPNG.onclick=()=>{ Plotly.toImage(vizDiv,{format:'png',width:1400,height:820,scale:2}).then(url=>{ btnPNG.href=url; }); };
-    btnPNG.style.display='inline-block';
-  }catch(e){ vizStatus.textContent='Viz error: '+e; throw e; }
+      title:'Flight — release '+fmt(toKmh(releaseSp),1)+' km/h · peak '+fmt(toKmh(peakSp),1)+' km/h · carry '+fmt(carry,1)+' m · apex '+fmt(apx,1)+' m'
+    },{responsive:true}).then(()=> vizStatus.textContent='Done.');
 }
-
-/* Hook action-bar shortcuts to hidden controls */
-document.getElementById('miLoadBin').onclick=()=>fileBin.click();
-document.getElementById('miCSV').onclick=()=>btnCSV.click();
-document.getElementById('miPNG').onclick=()=>btnPNG.click();
-
-/* Shortcuts */
-window.addEventListener('keydown', e=>{
-  if(['INPUT','TEXTAREA'].includes((e.target||{}).tagName)) return;
-  if(e.key==='c'||e.key==='C'){ if(!connected) doConnect(); else doDisconnect(); }
-  if(e.key==='d'||e.key==='D'){ dumpAutoViz=true; startDump(); }
-  if(e.key==='s'||e.key==='S'){ sendCmd('SUMMARY'); }
-  if(e.key==='r'||e.key==='R'){ sendCmd('REARM'); }
-});
-
-/* Start helpers */
-function startDump(){
-  if(!connected){ log('Not connected. Click Connect first.','#fca5a5'); return; }
-  btnSave.style.display='none'; dumping=false; useJsonFraming=false; dumpExpected=0; dumpGot=0; setProgress(0);
-  dumpBuf=new Uint8Array(0); userAskedDump=true; hdrBuf=new Uint8Array(0);
-  sendCmd('DUMP');
-}
-
-/* Init */
-setState('disconnected');
 
 })();
 </script>
