@@ -4,7 +4,7 @@
 <meta charset="utf-8"/>
 <meta http-equiv="x-ua-compatible" content="IE=edge"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
-<title>Disc Throw — BLE + 3D Viz (v1.7)</title>
+<title>Disc Throw — BLE + 3D Viz (v2.0, DL02-ready)</title>
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <style>
 :root{
@@ -18,11 +18,8 @@ body{margin:0;background:var(--bg);color:var(--text);
 header{padding:10px 14px;border-bottom:1px solid var(--border);background:#fff;position:sticky;top:0;z-index:2}
 h1{margin:0;font-size:18px}
 .wrap{padding:12px;display:grid;gap:12px;grid-template-columns:1fr}
-
-/* Wider right column on desktop */
 @media (min-width:1100px){ .wrap{ grid-template-columns:420px 1fr; } }
 @media (min-width:1400px){ .wrap{ grid-template-columns:430px 1fr; } }
-
 .card{background:var(--card);border:1px solid var(--border);border-radius:10px;box-shadow:0 1px 0 rgba(0,0,0,.03)}
 .card .pad{padding:14px}
 .row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
@@ -40,21 +37,15 @@ h1{margin:0;font-size:18px}
 .log{height:220px;overflow:auto;background:#0b1020;color:#dbeafe;border-radius:8px;padding:10px;font-size:13px;white-space:pre-wrap}
 .badge{display:inline-block;padding:3px 8px;border-radius:999px;border:1px solid var(--border);font-size:12px;color:var(--muted);background:#fff}
 .footer{padding:10px 14px;color:var(--muted);font-size:12px}
-
-/* >>> Make the visualizer span the FULL page width and be nice & tall */
 #vizCard{ grid-column: 1 / -1; }
-#viz{
-  height:70vh;        /* tall and responsive */
-  min-height:560px;   /* fallback height on short screens */
-  width:100%;
-}
+#viz{ height:70vh; min-height:560px; width:100%; }
 .small{font-size:12px;color:var(--muted)}
 </style>
 </head>
 <body>
 <header>
   <div class="row" style="justify-content:space-between;gap:8px">
-    <h1>Disc Throw — BLE + 3D Viz <span class="small">v1.7</span></h1>
+    <h1>Disc Throw — BLE + 3D Viz <span class="small">v2.0</span></h1>
     <div class="row">
       <span id="devName" class="badge">disconnected</span>
       <button id="btnConnect" class="btn primary">Connect</button>
@@ -103,7 +94,7 @@ h1{margin:0;font-size:18px}
     </div>
   </section>
 
-  <!-- Visualization (spans both columns) -->
+  <!-- Visualization -->
   <section id="vizCard" class="card">
     <div class="pad">
       <div class="row" style="justify-content:space-between;align-items:center">
@@ -321,7 +312,10 @@ h1{margin:0;font-size:18px}
         try{
           var safe = line.replace(/\bNaN\b/gi,'null').replace(/\b-?Infinity\b/gi,'null');
           var obj = JSON.parse(safe);
-          if (obj && obj.type==='summary'){ /* handled by recompute */ continue; }
+          if (obj && obj.type==='summary'){
+            log('[summary] samples='+obj.samples+' dur='+obj.duration_ms+'ms apex='+obj.apex_m+'m crc='+obj.crc32, '#cbd5e1');
+            continue;
+          }
           if (obj && obj.type==='dump_done'){ log('Dump done message received from device.','#86efac'); continue; }
           log(line, '#cbd5e1');
           continue;
@@ -339,15 +333,72 @@ h1{margin:0;font-size:18px}
   function fmt(x,d){ return isFinite(x) ? Number(x).toFixed(d) : '—'; }
   function clamp(x,a,b){ return Math.max(a, Math.min(b,x)); }
 
-  function stripHeaderIfAny(bytes){
+  function stripDl01Transport(bytes){
+    // If a DL01 preamble is present, strip it; otherwise return as-is
     if (bytes.length>=8 && bytes[0]===0x44 && bytes[1]===0x4c && bytes[2]===0x30 && bytes[3]===0x31){
       var sz = bytes[4] | (bytes[5]<<8) | (bytes[6]<<16) | (bytes[7]<<24);
       return bytes.slice(8, 8+sz);
     }
     return bytes;
   }
-  function parseRecords(buf){
-    // LogRec: u32 ms; i16 ax ay az (×100 m/s²); i16 gx gy gz (×10 dps); float pPa
+
+  // CRC32, same poly as firmware
+  function crc32(buf, off, len){
+    var crc = 0xFFFFFFFF>>>0;
+    for (var i=0;i<len;i++){
+      crc ^= buf[off+i];
+      for (var k=0;k<8;k++){
+        var mask = -(crc & 1);
+        crc = (crc >>> 1) ^ (0xEDB88320 & mask);
+      }
+    }
+    return (~crc)>>>0;
+  }
+
+  function parseDL02(buf){
+    var dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+    // Header
+    var magic = dv.getUint32(0,true); // 'DL02' little
+    if (magic !== 0x324C44) throw new Error('Bad DL02 magic');
+    var ver   = dv.getUint16(4,true);
+    var rate  = dv.getUint16(6,true);
+    var acc_k = dv.getUint16(8,true);  // x100
+    var gyr_k = dv.getUint16(10,true); // x10
+    var start_ms = dv.getUint32(12,true);
+    var pre_ms   = dv.getUint32(16,true);
+    var endian   = dv.getUint8(20);
+    var flags    = dv.getUint8(21);
+    // records start at 24
+    var recSize = 20;
+    var payloadBytes = buf.byteLength - 24;
+    if (payloadBytes < 4) throw new Error('DL02 too short');
+    // Footer CRC32
+    var crcReported = dv.getUint32(buf.byteLength-4, true);
+    var crcCalc = crc32(buf, 0, buf.byteLength-4);
+    log('DL02: ver='+ver+' rate='+rate+'Hz pre='+pre_ms+'ms flags=0x'+flags.toString(16)+' CRC reported='+
+        crcReported.toString(16)+' calc='+crcCalc.toString(16), (crcCalc===crcReported)?'#86efac':'#fca5a5');
+    // Number of records
+    var recBytes = payloadBytes - 4; // minus CRC footer already accounted; we used total
+    // Actually we included CRC in payloadBytes; fix:
+    recBytes = (buf.byteLength - 24) - 4;
+    var n = Math.floor(recBytes/recSize);
+    var off = 24;
+    var ms=new Uint32Array(n);
+    var ax=new Float64Array(n), ay=new Float64Array(n), az=new Float64Array(n);
+    var gx=new Float64Array(n), gy=new Float64Array(n), gz=new Float64Array(n);
+    var p =new Float64Array(n);
+    for (var i=0;i<n;i++){
+      ms[i]=dv.getUint32(off,true); off+=4;
+      ax[i]=dv.getInt16(off,true)/100; off+=2; ay[i]=dv.getInt16(off,true)/100; off+=2; az[i]=dv.getInt16(off,true)/100; off+=2;
+      gx[i]=dv.getInt16(off,true)/10;  off+=2; gy[i]=dv.getInt16(off,true)/10;  off+=2; gz[i]=dv.getInt16(off,true)/10;  off+=2;
+      var pPa = dv.getInt32(off,true); off+=4;
+      p[i]=(pPa===-2147483648)?NaN:pPa; // INT32_MIN => NaN
+    }
+    return {ms,ax,ay,az,gx,gy,gz,p, meta:{ver,rate,acc_k,gyr_k,start_ms,pre_ms,crc_ok:(crcReported===crcCalc)}};
+  }
+
+  function parseDL01_legacy(buf){
+    // Legacy: u32 ms; i16 ax ay az (×100); i16 gx gy gz (×10); float pPa
     var rec=4+2*6+4;
     var n=Math.floor(buf.length/rec);
     var ms=new Uint32Array(n);
@@ -359,11 +410,23 @@ h1{margin:0;font-size:18px}
     for (var i=0;i<n;i++){
       ms[i]=dv.getUint32(o,true); o+=4;
       ax[i]=dv.getInt16(o,true)/100; o+=2; ay[i]=dv.getInt16(o,true)/100; o+=2; az[i]=dv.getInt16(o,true)/100; o+=2;
-      gx[i]=dv.getInt16(o,true)/10;  o+=2; gy[i]=dv.getInt16(o,true)/10;  o+=2; gz[i]=dv.getInt16(o,true)/10;  o+=2; // dps ×10
+      gx[i]=dv.getInt16(o,true)/10;  o+=2; gy[i]=dv.getInt16(o,true)/10;  o+=2; gz[i]=dv.getInt16(o,true)/10;  o+=2;
       p[i]=dv.getFloat32(o,true); o+=4;
     }
-    return {ms:ms,ax:ax,ay:ay,az:az,gx:gx,gy:gy,gz:gz,p:p};
+    return {ms,ax,ay,az,gx,gy,gz,p, meta:{legacy:true}};
   }
+
+  function parseRecordsAuto(raw){
+    // 1) Strip DL01 transport
+    var payload = stripDl01Transport(raw);
+    // 2) Detect DL02 header
+    if (payload.length >= 24 && payload[0]===0x44 && payload[1]===0x4c && payload[2]===0x30 && payload[3]===0x32){
+      return parseDL02(payload);
+    }
+    // 3) Fallback legacy
+    return parseDL01_legacy(payload);
+  }
+
   function complementaryRPY(ax,ay,az,gx,gy,gz,dt,tau){
     var n=dt.length, roll=new Float64Array(n), pitch=new Float64Array(n), yaw=new Float64Array(n);
     var gxr=new Float64Array(n), gyr=new Float64Array(n), gzr=new Float64Array(n);
@@ -405,8 +468,7 @@ h1{margin:0;font-size:18px}
       var gN=Math.hypot(g_dps[i][0],g_dps[i][1],g_dps[i][2]);
       mask[i]=(gN>50)||Math.abs(aN-1)>0.15;
     }
-    // smoothing
-    var k=9, out=new Array(n);
+    var out=new Array(n);
     for (i=0;i<n;i++){
       var s=0;
       for (var j=-4;j<=4;j++){
@@ -457,11 +519,10 @@ h1{margin:0;font-size:18px}
   function yawMatrix(deg){ var r=deg*Math.PI/180, c=Math.cos(r), s=Math.sin(r); return [[c,-s,0],[s,c,0],[0,0,1]]; }
   function mulYaw(M,v){ return [ M[0][0]*v[0]+M[0][1]*v[1], M[1][0]*v[0]+M[1][1]*v[1], v[2] ]; }
 
-  function visualizeBytes(rawBytes){
+  function visualizeBytes(bytesRaw){
     vizStatus.textContent='Parsing…';
     try{
-      var payload = stripHeaderIfAny(new Uint8Array(rawBytes));
-      var rec = parseRecords(payload);
+      var rec = parseRecordsAuto(new Uint8Array(bytesRaw));
       if (!rec.ms.length){ vizStatus.textContent='No samples.'; return; }
 
       var t = new Array(rec.ms.length); for(var i=0;i<t.length;i++) t[i]=rec.ms[i]/1000;
@@ -470,7 +531,7 @@ h1{margin:0;font-size:18px}
       var rpy = complementaryRPY(rec.ax,rec.ay,rec.az,rec.gx,rec.gy,rec.gz,dt,0.5);
       var R = rotationMats(rpy.roll, rpy.pitch, rpy.yaw);
 
-      var aBody = new Array(rec.ax.length);
+      var aBody = new Array(rec.ax.length), i;
       for(i=0;i<aBody.length;i++) aBody[i]=[rec.ax[i],rec.ay[i],rec.az[i]];
       var aWorld = new Array(aBody.length);
       for(i=0;i<aWorld.length;i++) aWorld[i]=mulMV(R[i],aBody[i]);
@@ -488,7 +549,7 @@ h1{margin:0;font-size:18px}
       for(i=0;i<speed.length;i++) speed[i]=Math.hypot(v[i][0],v[i][1],v[i][2])+1e-12;
       var ir = pickReleaseIndex(t, speed);
 
-      // Baseline pressure → altitude
+      // Pressure → altitude (handles NaN gracefully)
       var valid = new Array(rec.p.length); for(i=0;i<valid.length;i++) valid[i]=isFinite(rec.p[i])&&rec.p[i]>1;
       var p0=(function(){
         var vv=[], j; for(j=0;j<rec.p.length;j++) if(valid[j]) vv.push(rec.p[j]);
@@ -498,7 +559,7 @@ h1{margin:0;font-size:18px}
         return sum/Math.min(n,vv.length);
       })();
       var alt=new Array(rec.p.length);
-      for(i=0;i<alt.length;i++) alt[i]=44330*(1.0 - Math.pow((rec.p[i]/100)/(p0/100), 1/5.255));
+      for(i=0;i<alt.length;i++) alt[i]=isFinite(rec.p[i]) ? 44330*(1.0 - Math.pow((rec.p[i]/100)/(p0/100), 1/5.255)) : NaN;
 
       // Align yaw with release velocity heading
       var theta = Math.atan2(v[ir][1], v[ir][0])*180/Math.PI;
@@ -506,11 +567,11 @@ h1{margin:0;font-size:18px}
       var pView = new Array(p.length);
       for(i=0;i<p.length;i++) pView[i]=mulYaw(Q,p[i]);
 
-      // KPIs (8 tiles)
+      // KPIs
       function toKmh(s){ return s*3.6; }
       var peakSp = -1; for(i=0;i<speed.length;i++) if (speed[i]>peakSp) peakSp=speed[i];
       var dtAvg=(t[t.length-1]-t[0])/Math.max(1,t.length-1); if(!isFinite(dtAvg)||dtAvg<=0) dtAvg=0.01;
-      var w = Math.max(1, Math.round(0.05/dtAvg)); // ±50ms
+      var w = Math.max(1, Math.round(0.05/dtAvg));
       var j0=Math.max(0,ir-w), j1=Math.min(speed.length-1, ir+w);
       var releaseSp=0; for(i=j0;i<=j1;i++) releaseSp+=speed[i]; releaseSp/=Math.max(1,(j1-j0+1));
       var gmag=0; for(i=j0;i<=j1;i++){ gmag+=Math.hypot(rec.gx[i],rec.gy[i],rec.gz[i]); } gmag/=Math.max(1,(j1-j0+1));
@@ -522,8 +583,9 @@ h1{margin:0;font-size:18px}
       var dx=p[p.length-1][0]-p[0][0], dy=p[p.length-1][1]-p[0][1];
       var carry=Math.hypot(dx,dy);
 
-      var mx=-1; for(i=0;i<alt.length;i++) if (alt[i]>mx) mx=alt[i];
-      var apex = (mx - alt[0]) || 0;
+      var mx=-1; for(i=0;i<alt.length;i++) if (isFinite(alt[i]) && alt[i]>mx) mx=alt[i];
+      var a0 = isFinite(alt[0])?alt[0]:0;
+      var apex = (mx - a0) || 0;
       var hang  = t[t.length-1] - t[0];
 
       // Apply to UI
@@ -539,7 +601,7 @@ h1{margin:0;font-size:18px}
       vizStatus.textContent='Rendering…';
       var xs=new Array(pView.length), ys=new Array(pView.length), zs=new Array(pView.length);
       for(i=0;i<pView.length;i++){ xs[i]=pView[i][0]; ys[i]=pView[i][1]; zs[i]=pView[i][2]; }
-      function rng(a){ var lo=Infinity, hi=-Infinity, k; for(k=0;k<a.length;k++){ if(a[k]<lo) lo=a[k]; if(a[k]>hi) hi=a[k]; } return (hi>lo)?[lo,hi]:[-1,1]; }
+      function rng(a){ var lo=Infinity, hi=-Infinity, k; for(k=0;k<a.length;k++){ if(isFinite(a[k])){ if(a[k]<lo) lo=a[k]; if(a[k]>hi) hi=a[k]; } } return (hi>lo)?[lo,hi]:[-1,1]; }
 
       var data = [
         {type:'scatter3d', mode:'lines', x:xs, y:ys, z:zs, line:{width:6}, name:'This throw'},
