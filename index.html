@@ -366,7 +366,10 @@ h1{margin:0;font-size:18px}
     for (var i=0;i<n;i++){
       ms[i]=dv.getUint32(o,true); o+=4;
       ax[i]=dv.getInt16(o,true)/100; o+=2; ay[i]=dv.getInt16(o,true)/100; o+=2; az[i]=dv.getInt16(o,true)/100; o+=2;
-      gx[i]=dv.getInt16(o,true)/100; o+=2; gy[i]=dv.getInt16(o,true)/100; o+=2; gz[i]=dv.getInt16(o,true)/100; o+=2;
+// parseRecords(buf)
+gx[i]=dv.getInt16(o,true)/10;  o+=2;
+gy[i]=dv.getInt16(o,true)/10;  o+=2;
+gz[i]=dv.getInt16(o,true)/10;  o+=2;
       p[i]=dv.getFloat32(o,true); o+=4;
     }
     return {ms:ms,ax:ax,ay:ay,az:az,gx:gx,gy:gy,gz:gz,p:p};
