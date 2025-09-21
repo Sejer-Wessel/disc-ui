@@ -4,7 +4,7 @@
 <meta charset="utf-8"/>
 <meta http-equiv="x-ua-compatible" content="IE=edge"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
-<title>Disc Throw — BLE + 3D Viz (v1.6)</title>
+<title>Disc Throw — BLE + 3D Viz (v1.7)</title>
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <style>
 :root{
@@ -18,8 +18,11 @@ body{margin:0;background:var(--bg);color:var(--text);
 header{padding:10px 14px;border-bottom:1px solid var(--border);background:#fff;position:sticky;top:0;z-index:2}
 h1{margin:0;font-size:18px}
 .wrap{padding:12px;display:grid;gap:12px;grid-template-columns:1fr}
-@media (min-width:1100px){.wrap{grid-template-columns:410px minmax(700px,1fr)}}
-@media (min-width:1400px){.wrap{grid-template-columns:430px minmax(900px,1fr)}}
+
+/* Wider right column on desktop */
+@media (min-width:1100px){ .wrap{ grid-template-columns:420px 1fr; } }
+@media (min-width:1400px){ .wrap{ grid-template-columns:430px 1fr; } }
+
 .card{background:var(--card);border:1px solid var(--border);border-radius:10px;box-shadow:0 1px 0 rgba(0,0,0,.03)}
 .card .pad{padding:14px}
 .row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
@@ -37,14 +40,21 @@ h1{margin:0;font-size:18px}
 .log{height:220px;overflow:auto;background:#0b1020;color:#dbeafe;border-radius:8px;padding:10px;font-size:13px;white-space:pre-wrap}
 .badge{display:inline-block;padding:3px 8px;border-radius:999px;border:1px solid var(--border);font-size:12px;color:var(--muted);background:#fff}
 .footer{padding:10px 14px;color:var(--muted);font-size:12px}
-#viz{height:680px;min-height:520px;width:100%}
+
+/* >>> Make the visualizer span the FULL page width and be nice & tall */
+#vizCard{ grid-column: 1 / -1; }
+#viz{
+  height:70vh;        /* tall and responsive */
+  min-height:560px;   /* fallback height on short screens */
+  width:100%;
+}
 .small{font-size:12px;color:var(--muted)}
 </style>
 </head>
 <body>
 <header>
   <div class="row" style="justify-content:space-between;gap:8px">
-    <h1>Disc Throw — BLE + 3D Viz <span class="small">v1.6</span></h1>
+    <h1>Disc Throw — BLE + 3D Viz <span class="small">v1.7</span></h1>
     <div class="row">
       <span id="devName" class="badge">disconnected</span>
       <button id="btnConnect" class="btn primary">Connect</button>
@@ -93,8 +103,8 @@ h1{margin:0;font-size:18px}
     </div>
   </section>
 
-  <!-- Visualization -->
-  <section class="card">
+  <!-- Visualization (spans both columns) -->
+  <section id="vizCard" class="card">
     <div class="pad">
       <div class="row" style="justify-content:space-between;align-items:center">
         <h2 style="margin:0;font-size:16px">3D Visualization</h2>
@@ -311,7 +321,7 @@ h1{margin:0;font-size:18px}
         try{
           var safe = line.replace(/\bNaN\b/gi,'null').replace(/\b-?Infinity\b/gi,'null');
           var obj = JSON.parse(safe);
-          if (obj && obj.type==='summary'){ applySummary(obj); log('Summary parsed & applied.','#93c5fd'); continue; }
+          if (obj && obj.type==='summary'){ /* handled by recompute */ continue; }
           if (obj && obj.type==='dump_done'){ log('Dump done message received from device.','#86efac'); continue; }
           log(line, '#cbd5e1');
           continue;
@@ -323,17 +333,6 @@ h1{margin:0;font-size:18px}
       }
     }
   }
-
-  function applySummary(o){
-    // These are left for backward compatibility if device sends them
-    // (UI now recomputes 8 KPIs from the binary visualization)
-  }
-
-  /* ================= UI BINDINGS ================= */
-  btnRearm.addEventListener('click', function(){ log('Rearm button clicked'); sendCmd('REARM'); });
-  btnSummary.addEventListener('click', function(){ log('Summary button clicked'); log('Sending "SUMMARY" (8B)…'); sendCmd('SUMMARY'); log('"SUMMARY" sent; awaiting response…'); });
-  btnDump.addEventListener('click', function(){ log('Dump button clicked'); btnSave.style.display='none'; dumping=false; dumpExpected=0; dumpBuf=new Uint8Array(0); userAskedDump=true; hdrBuf=new Uint8Array(0); log('DUMP sent (waiting for DL01 header)…'); sendCmd('DUMP'); });
-  btnErase.addEventListener('click', function(){ log('Erase button clicked'); sendCmd('ERASE'); });
 
   /* ================= 3D VIZ ================= */
   var G = 9.80665;
@@ -360,7 +359,7 @@ h1{margin:0;font-size:18px}
     for (var i=0;i<n;i++){
       ms[i]=dv.getUint32(o,true); o+=4;
       ax[i]=dv.getInt16(o,true)/100; o+=2; ay[i]=dv.getInt16(o,true)/100; o+=2; az[i]=dv.getInt16(o,true)/100; o+=2;
-      gx[i]=dv.getInt16(o,true)/10;  o+=2; gy[i]=dv.getInt16(o,true)/10;  o+=2; gz[i]=dv.getInt16(o,true)/10;  o+=2; // <-- dps ×10
+      gx[i]=dv.getInt16(o,true)/10;  o+=2; gy[i]=dv.getInt16(o,true)/10;  o+=2; gz[i]=dv.getInt16(o,true)/10;  o+=2; // dps ×10
       p[i]=dv.getFloat32(o,true); o+=4;
     }
     return {ms:ms,ax:ax,ay:ay,az:az,gx:gx,gy:gy,gz:gz,p:p};
@@ -406,7 +405,7 @@ h1{margin:0;font-size:18px}
       var gN=Math.hypot(g_dps[i][0],g_dps[i][1],g_dps[i][2]);
       mask[i]=(gN>50)||Math.abs(aN-1)>0.15;
     }
-    // simple smoothing
+    // smoothing
     var k=9, out=new Array(n);
     for (i=0;i<n;i++){
       var s=0;
@@ -420,7 +419,7 @@ h1{margin:0;font-size:18px}
   function integrateWithEndZero(a,t,move){
     var n=t.length, v=new Array(n), p=new Array(n), i, j;
     for (i=0;i<n;i++){ v[i]=[0,0,0]; p[i]=[0,0,0]; }
-    var dt=new Array(n); dt[0]=0; for (i=1;i<n;i++) dt[i]=Math.max(0.001, Math.min(0.05, t[i]-t[i-1])); // avoid zeros
+    var dt=new Array(n); dt[0]=0; for (i=1;i<n;i++) dt[i]=Math.max(0.001, Math.min(0.05, t[i]-t[i-1]));
     for (i=1;i<n;i++){ for (j=0;j<3;j++){ v[i][j]=v[i-1][j]+a[i][j]*dt[i]; } }
     var any=false; for(i=0;i<move.length;i++){ if(move[i]){ any=true; break; } }
     if (any){
@@ -439,7 +438,6 @@ h1{margin:0;font-size:18px}
     return {v:v, p:p};
   }
   function pickReleaseIndex(t, speed){
-    // Smooth speed to avoid early jitter influencing release pick
     var n=t.length, s=new Array(n);
     var dtAvg=(t[n-1]-t[0])/(Math.max(1,n-1)); if(!isFinite(dtAvg)||dtAvg<=0) dtAvg=0.01;
     var w=Math.max(1, Math.round(0.05/dtAvg)); // ±50 ms
@@ -450,7 +448,7 @@ h1{margin:0;font-size:18px}
       }
       s[i]=sum/Math.max(1,c);
     }
-    var endT=t[0]+Math.min(0.30, t[t.length-1]-t[0]); // look at first 300ms
+    var endT=t[0]+Math.min(0.30, t[t.length-1]-t[0]);
     var endI=n-1; for(var ii=0;ii<n;ii++){ if (t[ii]>=endT){ endI=ii; break; } }
     var mx=-1, mi=0;
     for (var i2=0;i2<=endI;i2++){ if (s[i2]>mx){ mx=s[i2]; mi=i2; } }
@@ -508,32 +506,27 @@ h1{margin:0;font-size:18px}
       var pView = new Array(p.length);
       for(i=0;i<p.length;i++) pView[i]=mulYaw(Q,p[i]);
 
-      // KPI calculations (8 tiles)
+      // KPIs (8 tiles)
       function toKmh(s){ return s*3.6; }
       var peakSp = -1; for(i=0;i<speed.length;i++) if (speed[i]>peakSp) peakSp=speed[i];
       var dtAvg=(t[t.length-1]-t[0])/Math.max(1,t.length-1); if(!isFinite(dtAvg)||dtAvg<=0) dtAvg=0.01;
-      var w = Math.max(1, Math.round(0.05/dtAvg)); // ±50ms around release
+      var w = Math.max(1, Math.round(0.05/dtAvg)); // ±50ms
       var j0=Math.max(0,ir-w), j1=Math.min(speed.length-1, ir+w);
       var releaseSp=0; for(i=j0;i<=j1;i++) releaseSp+=speed[i]; releaseSp/=Math.max(1,(j1-j0+1));
       var gmag=0; for(i=j0;i<=j1;i++){ gmag+=Math.hypot(rec.gx[i],rec.gy[i],rec.gz[i]); } gmag/=Math.max(1,(j1-j0+1));
-      var spinRpm = gmag/6; // dps → rpm ( /360 * 60 )
+      var spinRpm = gmag/6; // dps → rpm
 
-      // Orientation @ release
       var hyzerDeg = -rpy.roll[ir]*180/Math.PI;
       var noseDeg  =  rpy.pitch[ir]*180/Math.PI;
 
-      // Carry (horizontal displacement)
       var dx=p[p.length-1][0]-p[0][0], dy=p[p.length-1][1]-p[0][1];
       var carry=Math.hypot(dx,dy);
 
-      // Apex
       var mx=-1; for(i=0;i<alt.length;i++) if (alt[i]>mx) mx=alt[i];
       var apex = (mx - alt[0]) || 0;
-
-      // Hang time
       var hang  = t[t.length-1] - t[0];
 
-      // Apply to UI (8 tiles)
+      // Apply to UI
       apexEl.textContent  = fmt(apex,2);
       carryEl.textContent = fmt(carry,1);
       vrelEl.textContent  = fmt(toKmh(releaseSp),1);
