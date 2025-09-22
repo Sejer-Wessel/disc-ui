@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
-<title>Disc Throw — Minimal (v1.10m)</title>
+<title>Disc Throw — Minimal (v1.11m, auto-REARM)</title>
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <style>
 :root{--bg:#f7f8fb;--card:#fff;--text:#111;--muted:#666;--accent:#2563eb;--ok:#16a34a;--err:#dc2626;--border:#e5e7eb}
@@ -175,17 +175,27 @@ function appendDumpData(arr){
 
 function finishDump(reason){
   dumping=false; userAskedDump=false; setProgress(1);
-  // Trim to DL01
+
+  // Trim to DL01 payload if present
   const idx=findDl01Header(dumpBuf);
-  if(idx!==-1 && dumpBuf.length>=idx+8){
+  if (idx!==-1 && dumpBuf.length>=idx+8){
     const off=idx+4, sz=dumpBuf[off]|(dumpBuf[off+1]<<8)|(dumpBuf[off+2]<<16)|(dumpBuf[off+3]<<24);
-    const need=idx+8+sz; if(dumpBuf.length>=need) dumpBuf=dumpBuf.slice(idx,need); dumpExpected=need;
+    const need=idx+8+sz; if (dumpBuf.length>=need) dumpBuf=dumpBuf.slice(idx,need); dumpExpected=need;
   }
+
   const blob=new Blob([dumpBuf],{type:'application/octet-stream'});
-  const url=URL.createObjectURL(blob); btnSave.href=url; btnSave.style.display='inline-block';
+  const url=URL.createObjectURL(blob);
+  btnSave.href=url; btnSave.style.display='inline-block';
   btnSave.download='throw_'+new Date().toISOString().replace(/[:.]/g,'-')+'.bin';
   log('Dump finished ('+dumpBuf.length+'/'+dumpExpected+') ['+reason+']','#86efac');
-  setState('postble');
+
+  // ✅ Auto-REARM the device so it’s ready for the next throw
+  setTimeout(()=>{
+    log('Auto-REARM…');
+    sendCmd('REARM');
+  }, 350);
+
+  setState('postble'); // UI text; connection stays up
   visualizeBytes(dumpBuf).catch(e=>{ vizStatus.textContent='Viz error: '+e; });
 }
 
@@ -229,19 +239,34 @@ function processTextBuf(){
   while((pos=textBuf.indexOf('\n'))!==-1){
     const raw=textBuf.slice(0,pos); textBuf=textBuf.slice(pos+1);
     const line=raw.trim(); if(!line) continue;
+
     if(line[0]==='{' && line[line.length-1]==='}'){
       try{
         const obj=JSON.parse(line.replace(/\bNaN\b/gi,'null').replace(/\b-?Infinity\b/gi,'null'));
-        if(obj.type==='dump_begin' && typeof obj.bytes==='number'){ dumping=true; useJsonFraming=true; dumpExpected=obj.bytes; setProgress(0); log('dump_begin '+dumpExpected+' bytes','#fde68a'); continue; }
-        if(obj.type==='dump_done'){ log('dump_done','#86efac'); continue; }
-        if(obj.type==='summary'){ lastSummaryMs = Number(obj.duration_ms)||null; summaryStatus.textContent='Samples '+obj.samples+' · duration '+obj.duration_ms+' ms'; if(isFinite(obj.apex_m)) apexEl.textContent=Number(obj.apex_m).toFixed(2); continue; }
+
+        if(obj.type==='dump_begin' && typeof obj.bytes==='number'){
+          dumping=true; useJsonFraming=true; dumpExpected=obj.bytes; setProgress(0); log('dump_begin '+dumpExpected+' bytes','#fde68a'); continue;
+        }
+        if(obj.type==='dump_done'){
+          log('dump_done','#86efac');
+          if (dumping) finishDump('dump_done_signal'); // finalize even if size match hasn’t triggered yet
+          continue;
+        }
+        if(obj.type==='summary'){
+          lastSummaryMs = Number(obj.duration_ms)||null;
+          summaryStatus.textContent='Samples '+obj.samples+' · duration '+obj.duration_ms+' ms';
+          if(isFinite(obj.apex_m)) apexEl.textContent=Number(obj.apex_m).toFixed(2);
+          continue;
+        }
+        if(obj.ok==='rearmed'){ log('Device rearmed','#86efac'); setState('armed'); continue; }
+
         log(line,'#cbd5e1');
       }catch(err){ log('JSON parse error: '+err,'#fca5a5'); }
     } else log(line);
   }
 }
 
-// ---------- Viz (with guards against bad data) ----------
+// ---------- Viz (guards for bad data) ----------
 const G=9.80665;
 function fmt(x,d){ return isFinite(x)?Number(x).toFixed(d):'—'; }
 
@@ -268,8 +293,6 @@ function parseRecords(buf){
   }
   return {ms,ax,ay,az,gx,gy,gz,p};
 }
-
-// U32 time → seconds, handle wrap & clamp weird jumps
 function normalizeTime(msU32){
   const MAX=0x100000000>>>0;
   const n=msU32.length; const t=new Array(n);
@@ -283,7 +306,6 @@ function normalizeTime(msU32){
   for(let i=1;i<n;i++){ const dt=t[i]-t[i-1]; if(dt<0.001||dt>0.1){ t[i]=t[i-1]+Math.max(0.001, Math.min(0.05, dt)); } }
   return t;
 }
-
 function complementaryRPY(ax,ay,az,gx,gy,gz,dt,tau){
   const n=dt.length, roll=new Float64Array(n), pitch=new Float64Array(n), yaw=new Float64Array(n);
   const gxr=new Float64Array(n), gyr=new Float64Array(n), gzr=new Float64Array(n);
@@ -360,7 +382,6 @@ function visualizeBytes(rawBytes){
 
   const speed=new Array(v.length); for(let i=0;i<speed.length;i++) speed[i]=Math.hypot(v[i][0],v[i][1],v[i][2])+1e-12;
   const ir = (function pickReleaseIndex(){
-    // smoothed early-window max
     const n=t.length; const s=new Array(n);
     const dtAvg=(t[n-1]-t[0])/Math.max(1,n-1)||0.01; const w=Math.max(1,Math.round(0.05/dtAvg));
     for(let i=0;i<n;i++){ let sum=0,c=0; for(let j=-w;j<=w;j++){ const k=i+j; if(k>=0&&k<n){ sum+=speed[k]; c++; } } s[i]=sum/Math.max(1,c); }
@@ -368,24 +389,22 @@ function visualizeBytes(rawBytes){
     let mx=-1, mi=0; for(let i=0;i<=endI;i++) if(s[i]>mx){ mx=s[i]; mi=i; } return mi;
   })();
 
-  // Pressure → altitude with guards (ignore zeros/bad)
+  // Pressure → altitude with guards
   function altFromPa(pPa,p0Pa){
     if(!isFinite(pPa) || pPa<50000 || pPa>110000) return NaN;
     return 44330*(1.0 - Math.pow((pPa/100)/(p0Pa/100), 1/5.255));
   }
-  // p0 = median of first second of valid samples
   const validIdx=[]; for(let i=0;i<rec.p.length;i++){ if(isFinite(rec.p[i]) && rec.p[i]>50000 && rec.p[i]<110000) validIdx.push(i); }
   let p0Pa=101325; if(validIdx.length){ const firstSecond = validIdx.filter(i=>t[i]-t[0]<1.0).map(i=>rec.p[i]); firstSecond.sort((a,b)=>a-b); p0Pa = firstSecond[Math.floor(firstSecond.length/2)] || firstSecond[0] || 101325; }
   const alt=new Array(rec.p.length); for(let i=0;i<alt.length;i++) alt[i]=altFromPa(rec.p[i],p0Pa);
 
-  // Reorient yaw by release heading
   const theta=Math.atan2(v[ir][1],v[ir][0])*180/Math.PI; const Q=yawMatrix(-theta);
   const pView=new Array(p.length); for(let i=0;i<p.length;i++) pView[i]=mulYaw(Q,p[i]);
 
-  // KPIs (clamped)
   function toKmh(s){ return s*3.6; }
   let peakSp=0; for(let i=0;i<speed.length;i++) if(speed[i]>peakSp) peakSp=speed[i];
-  const dtAvg=(t[t.length-1]-t[0])/Math.max(1,t.length-1)||0.01; const w=Math.max(1,Math.round(0.05/dtAvg));
+  const dtAvg=(t[t.length-1]-t[0])/Math.max(1,t.length-1)||0.01;
+  const w=Math.max(1,Math.round(0.05/dtAvg));
   const j0=Math.max(0,ir-w), j1=Math.min(speed.length-1, ir+w);
   let releaseSp=0; for(let i=j0;i<=j1;i++) releaseSp+=speed[i]; releaseSp/=Math.max(1,(j1-j0+1));
   let gmag=0; for(let i=j0;i<=j1;i++) gmag+=Math.hypot(rec.gx[i],rec.gy[i],rec.gz[i]); gmag/=Math.max(1,(j1-j0+1));
